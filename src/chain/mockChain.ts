@@ -22,7 +22,7 @@ import {
   WalletStorageManager,
   randomBytesHex
 } from '@bsv/wallet-toolbox'
-import { specOpSetWalletChangeParams, type PostBeefResult } from '@bsv/wallet-toolbox/out/src/sdk'
+import type { PostBeefResult } from '@bsv/wallet-toolbox/out/src/sdk'
 import knexFactory, { type Knex } from 'knex'
 
 export interface MockWallet {
@@ -51,26 +51,47 @@ class ImmediateBroadcastWallet extends Wallet {
 }
 
 /**
- * A dev chain with automine, like Hardhat or regtest scripts:
- * - every newly accepted transaction is mined straight away, so a child is never
- *   posted on top of an unconfirmed parent (MockServices cannot verify such chains);
- * - re-posting a known transaction succeeds, because both the payer and the
- *   payee of a BRC-29 payment broadcast it.
+ * MockServices with two fixes that make it behave like a real broadcaster
+ * (the same two patches the BSV Association's token kit applies in its tests):
+ * - re-posting a known transaction succeeds ("already known"), because both the
+ *   payer and the payee of a BRC-29 payment broadcast it;
+ * - when a transaction spends two outputs of the same unconfirmed parent (the
+ *   soul token and its change, say), every input shares one parsed parent, so
+ *   script verification can walk the whole unconfirmed ancestry.
+ * Blocks are not needed for settlement: payments are final at 0-conf.
  */
-class AutomineMockServices extends MockServices {
+class DevChainServices extends MockServices {
+  constructor(knex: Knex) {
+    super(knex)
+    ;(this as any).hydrateInputSourcesFromBeef = (tx: Transaction, beef: Beef): void => {
+      const cache = new Map<string, Transaction>()
+      const walk = (t: Transaction): void => {
+        for (const input of t.inputs) {
+          if (input.sourceTransaction !== undefined || input.sourceTXID === undefined) continue
+          let source = cache.get(input.sourceTXID)
+          if (source === undefined) {
+            const raw = beef.findTxid(input.sourceTXID)?.rawTx
+            if (raw === undefined) continue
+            source = Transaction.fromBinary(Array.from(raw))
+            cache.set(input.sourceTXID, source)
+            walk(source)
+          }
+          input.sourceTransaction = source
+        }
+      }
+      walk(tx)
+    }
+  }
+
   override async postBeef(beef: Beef, txids: string[]): Promise<PostBeefResult[]> {
     const results: PostBeefResult[] = []
-    let accepted = false
     for (const txid of txids) {
       if ((await this.storage.getTransaction(txid)) != null) {
         results.push({ name: 'MockServices', status: 'success', txidResults: [{ txid, status: 'success' }] })
-        continue
+      } else {
+        results.push(...(await super.postBeef(beef, [txid])))
       }
-      const [result] = await super.postBeef(beef, [txid])
-      accepted ||= result.status === 'success'
-      results.push(result)
     }
-    if (accepted) await this.mineBlock()
     return results
   }
 }
@@ -87,12 +108,12 @@ function memoryKnex(): Knex {
 const COINBASE_MATURITY = 100
 
 export class MockChain {
-  readonly services: AutomineMockServices
+  readonly services: DevChainServices
   private readonly wallets: MockWallet[] = []
   private readonly dbs: Knex[] = []
 
   private constructor(private readonly chainDb: Knex) {
-    this.services = new AutomineMockServices(chainDb)
+    this.services = new DevChainServices(chainDb)
   }
 
   static async create(): Promise<MockChain> {
@@ -153,7 +174,7 @@ export class MockChain {
     const wallet = new ImmediateBroadcastWallet({ chain: 'mock', keyDeriver, storage, services: this.services, monitor })
     // Keep several mid-sized coins instead of consolidating into one, so a payment
     // and the guardian's allowance token can be built at the same time.
-    await wallet.listOutputs({ basket: specOpSetWalletChangeParams, tags: ['8', '500'] })
+    await wallet.setWalletChangeParams(8, 500)
     const mw: MockWallet = { name, wallet, identityKey, monitor }
     this.wallets.push(mw)
     if (fundSatoshis > 0) await this.fund(mw, fundSatoshis, coins)

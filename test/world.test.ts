@@ -76,6 +76,15 @@ test('visitors pay the pet for poems over HTTP 402', async () => {
   assert.equal(await world.petWallet.wallet.balance(), before + config.pet.poemPriceSats)
 })
 
+test('everything settles at 0-conf: no block is mined while the pet trades', async () => {
+  const height = await world.chain.height()
+  assert.ok((await world.pet.feedSelf())?.ok)
+  const { status } = await world.visitorBuysPoem(baseUrl, 'zero conf')
+  assert.equal(status, 200)
+  await world.pet.saveSoul()
+  assert.equal(await world.chain.height(), height)
+})
+
 test('saving the soul spends the previous token and anchors the guardian journal', async () => {
   const previous = world.pet.soul!
   const next = await world.pet.saveSoul()

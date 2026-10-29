@@ -43,7 +43,7 @@ pet's on-chain **soul token**.
 | Piece | What it really is |
 | --- | --- |
 | Wallets | Real `@bsv/wallet-toolbox` `Wallet`s: real keys, signatures, BEEF and SPV checks |
-| Chain | `MockServices` from wallet-toolbox: a private, offline chain with automine. No wifi needed on stage |
+| Chain | `MockServices` from wallet-toolbox: a private, offline chain. No wifi needed on stage. Payments settle at 0-conf, as on mainnet |
 | Guardian hook | `WalletPermissionsManager` spending authorization (BRC-73 DSAP). The guardian replaces the human approval prompt |
 | Allowances | Real on-chain DSAP permission tokens, listed in the dashboard |
 | Payments | `@bsv/402-pay` (BRC-121) client and server middleware, BRC-29 outputs |
@@ -57,7 +57,7 @@ Requires Node.js 22+.
 ```sh
 npm install
 npm start          # dashboard on http://localhost:4000
-npm test           # 6 end-to-end tests on the offline chain, about 3 seconds
+npm test           # 7 end-to-end tests on the offline chain, about 10 seconds
 npm run typecheck
 ```
 
@@ -86,7 +86,7 @@ Ports: 4000 dashboard and poem shop, 4001 Snack Shop, 4002 Free Sats Giveaway.
 
 ```
 src/
-  chain/mockChain.ts     offline chain with automine, wallet factory, faucet
+  chain/mockChain.ts     offline chain (MockServices + broadcaster fixes), wallet factory, faucet
   wallet/agentWallet.ts  WalletPermissionsManager config, originator binding for 402
   guardian/policy.ts     deterministic rules (pure, unit-testable)
   guardian/llmJudge.ts   Claude review for "review" outcomes
@@ -112,9 +112,10 @@ These cost hours and are worth knowing if you extend it:
 - While a payment is being built the wallet has already locked its inputs, so `balance()` inside the
   authorization callback reads low. The guardian snapshots the balance when the intent is declared.
 - Minting an allowance token while the payment is still pending needs a second coin. The demo wallets keep
-  8 coins of 500+ sats (`setWalletChangeParams` spec op) and the faucet pays in several outputs.
-- `MockServices` cannot verify chains of unconfirmed transactions and rejects re-broadcasts, so the demo
-  chain mines a block after every new transaction and treats known transactions as success.
+  8 coins of 500+ sats (`wallet.setWalletChangeParams(8, 500)`) and the faucet pays in several outputs.
+- `MockServices` treats a re-broadcast as a double spend, and fails to verify a transaction that spends two
+  outputs of the same unconfirmed parent. `DevChainServices` patches both, the same way the BSV
+  Association's token kit does in its tests (`BSV_STACK_COMPLETE_GUIDE.md`, `test/helpers/mockchain.ts`).
 
 ## Roadmap for the hackathon (30 h)
 
@@ -129,11 +130,12 @@ These cost hours and are worth knowing if you extend it:
 
 Not wired up yet: `createWorld()` refuses `SATSPET_MODE=live`. The checklist:
 
-1. Build wallets with `Setup.createWalletSQLite` (or `StorageKnex` + `Services.createDefaultOptions(chain)`)
-   instead of `MockChain.createWallet`, one file per party, and call `monitor.startTasks()` so delayed
-   broadcasts and proofs are handled.
-2. Fund the pet wallet, e.g. with `npx --package @bsv/fund-wallet fund-metanet --chain test`.
-3. Keep the `ImmediateBroadcastWallet` idea or rely on the monitor; drop `AutomineMockServices`.
+1. Build the pet's server wallet as in the BSV guide §14.2: `StorageKnex` on SQLite, `Services` with
+   `options.arcadeUrl = 'https://arcade-v2-us-1.bsvblockchain.tech'` so Arcade broadcasts first, a `Monitor`
+   with default tasks and `monitor.startTasks()`.
+2. Fund it from BSV Desktop (https://desktop.bsvb.tech/) with a BRC-29 payment to the pet's identity key
+   (guide §9 and §11); the BSV Association mentors hand out mainnet sats on request.
+3. Keep `acceptDelayedBroadcast: false` (as the BSV guide's BRC-29 sender does) or rely on the monitor; drop `DevChainServices`.
 4. Run the shops on real hostnames and keep the guardian's merchant list in sync with them.
 5. Link txids to a block explorer in the dashboard.
 
@@ -142,5 +144,5 @@ Not wired up yet: `createWorld()` refuses `SATSPET_MODE=live`. The checklist:
 - 启动：`npm install && npm start`，然后打开 http://localhost:4000。
 - 没有 API key 也能完整演示，用的是离线链和规则版大脑。设置 `ANTHROPIC_API_KEY` 后，宠物聊天和守门员复核会用 Claude。
 - 主要卖点：AI 宠物很好骗，但钱包里的守门员 agent 不会被骗。每一笔授权都哈希串起来，写进链上的灵魂 token。
-- 先跑 `npm test`，6 个测试都通过就说明链、钱包、402 付款和守门员都没问题。
+- 先跑 `npm test`，7 个测试都通过就说明链、钱包、402 付款和守门员都没问题。
 - 分工建议：一人负责 Claude 提示词和守门员策略，一人负责前端宠物动画，一人负责 live 模式和演示脚本。
