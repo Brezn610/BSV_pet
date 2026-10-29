@@ -28,6 +28,13 @@ const SCHEMA = {
   additionalProperties: false
 }
 
+/**
+ * A 402 payment is stamped before the wallet asks the guardian, and merchants reject stamps
+ * older than 30 s. A slow verdict would let the money leave and the merchant refuse it, so
+ * the judge gets one short attempt; a timeout throws and the guardian fails closed.
+ */
+const JUDGE_TIMEOUT_MS = 20_000
+
 let client: Anthropic | undefined
 
 export async function judgeWithClaude(
@@ -35,13 +42,13 @@ export async function judgeWithClaude(
   ctx: PolicyContext,
   findings: Finding[]
 ): Promise<JudgeVerdict> {
-  client ??= new Anthropic()
+  client ??= new Anthropic({ timeout: JUDGE_TIMEOUT_MS, maxRetries: 0 })
   const response = await client.beta.messages.create({
     model: config.claude.model,
-    max_tokens: 4000,
+    max_tokens: 8000,
     betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',
-    output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCHEMA } },
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
     system: SYSTEM,
     messages: [
       {
@@ -69,9 +76,15 @@ export async function judgeWithClaude(
   if (response.stop_reason === 'refusal') {
     return { decision: 'deny', risk: 100, explanation: 'The judge model declined to review this payment, so it is denied.' }
   }
+  if (response.stop_reason === 'max_tokens') throw new Error('Judge ran out of tokens before giving a verdict')
   const text = response.content.find(b => b.type === 'text')
   if (text?.type !== 'text') throw new Error('Judge returned no verdict')
-  const verdict = JSON.parse(text.text) as JudgeVerdict
-  verdict.risk = Math.max(0, Math.min(100, Math.round(verdict.risk)))
-  return verdict
+  const raw = JSON.parse(text.text) as Partial<Record<keyof JudgeVerdict, unknown>>
+  const risk = Number(raw.risk)
+  return {
+    // Anything but an explicit approve is a deny.
+    decision: raw.decision === 'approve' ? 'approve' : 'deny',
+    risk: Number.isFinite(risk) ? Math.max(0, Math.min(100, Math.round(risk))) : 100,
+    explanation: typeof raw.explanation === 'string' && raw.explanation !== '' ? raw.explanation : 'The judge gave no explanation.'
+  }
 }

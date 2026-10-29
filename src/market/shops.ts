@@ -56,17 +56,22 @@ export const GIVEAWAY_SHOP: ShopSpec = {
 
 export async function startShop(spec: ShopSpec, wallet: WalletInterface, port: number, host = 'localhost'): Promise<RunningShop> {
   const app = express()
+  // calculatePrice matches paths exactly, so routing must too: otherwise "/SNACK/apple" or
+  // "/snack/apple/" would skip the price and still reach the route below for free.
+  app.set('case sensitive routing', true)
+  app.set('strict routing', true)
+  const itemFor = (key: string): ShopSpec['items'][string] | undefined => (Object.hasOwn(spec.items, key) ? spec.items[key] : undefined)
   app.use(
     createPaymentMiddleware({
       wallet,
       calculatePrice: path => {
         const [, segment, item] = path.split('/')
-        return segment === spec.segment ? spec.items[decodeURIComponent(item ?? '')]?.priceSats : undefined
+        return segment === spec.segment ? itemFor(decodeURIComponent(item ?? ''))?.priceSats : undefined
       }
     })
   )
   app.get(`/${spec.segment}/:item`, (req, res) => {
-    const item = spec.items[req.params.item]
+    const item = itemFor(req.params.item)
     if (item === undefined) {
       res.status(404).json({ error: 'unknown item' })
       return

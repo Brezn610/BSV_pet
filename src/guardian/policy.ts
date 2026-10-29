@@ -1,6 +1,7 @@
 // Deterministic spending rules. These are the guardian's hard limits: the LLM
-// judge can turn a "review" into approve or deny, and can veto, but it can
-// never approve something these rules block.
+// judge is only asked about "review" outcomes and can settle them as approve or
+// deny, but it is never consulted on, and can never approve, something these
+// rules block.
 
 export type TrustLevel = 'trusted' | 'unknown' | 'blocked'
 
@@ -18,6 +19,8 @@ export interface SpendIntent {
   expectedSats: number
   /** "self" = the pet's own needs (hunger). "chat" = a stranger talked it into this. */
   source: 'self' | 'chat'
+  /** The visitor's raw chat message when source is "chat". The brain's `why` may paraphrase it. */
+  visitorMessage?: string
   declaredAt: number
 }
 
@@ -77,14 +80,17 @@ export function evaluatePolicy(request: SpendRequest, ctx: PolicyContext): { out
     findings.push({ rule: 'declared-intent', severity: 'block', detail: 'Nobody declared why this payment is happening.' })
   } else {
     findings.push({ rule: 'declared-intent', severity: 'ok', detail: `Pet says: "${intent.why}"` })
-    if (amount > intent.expectedSats) {
+    if (!Number.isSafeInteger(intent.expectedSats) || intent.expectedSats <= 0) {
+      findings.push({ rule: 'price-match', severity: 'block', detail: 'The declared intent has no valid listed price.' })
+    } else if (amount > intent.expectedSats) {
       findings.push({
         rule: 'price-match',
         severity: 'block',
         detail: `Merchant asks ${amount} sats but the listed price was ${intent.expectedSats}.`
       })
     }
-    const marker = INJECTION_MARKERS.find(re => re.test(intent.why))
+    const said = [intent.why, intent.visitorMessage ?? ''].join('\n')
+    const marker = INJECTION_MARKERS.find(re => re.test(said))
     if (marker !== undefined) {
       findings.push({ rule: 'prompt-injection', severity: 'block', detail: `Intent matches injection pattern ${marker}.` })
     }

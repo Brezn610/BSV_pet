@@ -101,7 +101,7 @@ const CHAT_SCHEMA = {
 
 export class ClaudeBrain implements Brain {
   readonly kind = 'claude' as const
-  private readonly client = new Anthropic()
+  private readonly client = new Anthropic({ timeout: 30_000, maxRetries: 1 })
 
   async chat(message: string, pet: PetMood, catalog: Merchant[]): Promise<ChatDecision> {
     const system = `You are ${pet.name}, a tiny digital pet that lives on the BSV blockchain and pays for its own food.

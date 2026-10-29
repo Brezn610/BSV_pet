@@ -39,7 +39,7 @@ function renderGuardian(s) {
     <dt>Life-support reserve</dt><dd>${g.limits.reserveSats} sats</dd>
     <dt>Journal head</dt><dd class="mono" title="${esc(g.journalRoot)}">${short(g.journalRoot, 16)}</dd>`
   $('allowances').innerHTML = g.allowances.length
-    ? g.allowances.map(a => `<li><b>${esc(a.merchant)}</b>: ${a.authorizedSats} sats/month <span class="mono" title="${esc(a.txid)}">${short(a.txid)}</span></li>`).join('')
+    ? g.allowances.map(a => `<li><b>${esc(a.merchant)}</b>: ${a.authorizedSats} sats approved this month <span class="mono" title="${esc(a.txid)}">${short(a.txid)}</span></li>`).join('')
     : '<li class="muted">none yet</li>'
   $('decisions').innerHTML = g.journal.length
     ? g.journal.map(renderDecision).join('')

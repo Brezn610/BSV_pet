@@ -3,7 +3,7 @@
 // hash-chained journal of its decisions whose head is anchored in the pet's
 // on-chain soul token.
 import { Hash, Utils } from '@bsv/sdk'
-import type { Wallet, WalletPermissionsManager } from '@bsv/wallet-toolbox'
+import type { PermissionToken, Wallet, WalletPermissionsManager } from '@bsv/wallet-toolbox'
 import type { EventBus } from '../events'
 import { judgeWithClaude } from './llmJudge'
 import {
@@ -19,7 +19,10 @@ import {
 
 export interface Verdict {
   decision: 'approve' | 'deny'
-  /** "once" = ephemeral grant. "allowance" = recurring on-chain DSAP token for a trusted merchant. */
+  /**
+   * "once" = ephemeral grant. "allowance" = an on-chain DSAP token for a trusted merchant, sized to
+   * cover exactly what has been approved this month, so the next payment comes back to the guardian.
+   */
   mode: 'once' | 'allowance'
   allowanceSats?: number
   risk: number
@@ -44,7 +47,8 @@ export interface GuardianOptions {
   wallet: Wallet
   events: EventBus
   limits: PolicyLimits
-  trustedAllowanceSats: number
+  /** Record approvals for trusted merchants as on-chain allowance tokens (BRC-73 DSAP). */
+  issueAllowances: boolean
   merchants: MerchantProfile[]
   useClaude: boolean
 }
@@ -60,7 +64,8 @@ export class Guardian {
    */
   private balanceSnapshot = 0
   private readonly merchants = new Map<string, MerchantProfile>()
-  private readonly settled: Array<{ at: number; sats: number }> = []
+  /** Every approved spend, network fee included. Counted at approval, so a payment that leaves but is never served still counts. */
+  private readonly approvedSpends: Array<{ at: number; sats: number }> = []
   readonly journal: JournalEntry[] = []
 
   constructor(private readonly opts: GuardianOptions) {
@@ -95,13 +100,9 @@ export class Guardian {
     this.intents.delete(merchant)
   }
 
-  recordSettled(sats: number): void {
-    this.settled.push({ at: Date.now(), sats })
-  }
-
   spentLast24h(): number {
     const since = Date.now() - 24 * 3600 * 1000
-    return this.settled.filter(s => s.at >= since).reduce((sum, s) => sum + s.sats, 0)
+    return this.approvedSpends.filter(s => s.at >= since).reduce((sum, s) => sum + s.sats, 0)
   }
 
   /** On-chain allowances (DSAP tokens) currently held for trusted merchants. */
@@ -146,6 +147,7 @@ export class Guardian {
     }
 
     if (verdict.decision === 'approve') {
+      this.approvedSpends.push({ at: Date.now(), sats: request.satoshis })
       try {
         await this.opts.manager.grantPermission({
           requestID: request.requestID,
@@ -188,14 +190,17 @@ export class Guardian {
     }
 
     if (outcome === 'approve') {
-      const allowance = this.opts.trustedAllowanceSats
-      if (merchant?.trust === 'trusted' && intent?.source === 'self' && allowance > 0) {
+      if (merchant?.trust === 'trusted' && intent?.source === 'self' && this.opts.issueAllowances) {
+        // The wallet skips this callback while an allowance still has headroom, so the token
+        // covers only what has been paid, this payment included (the wallet labels the pending
+        // action before asking). The next payment needs the guardian again.
+        const allowanceSats = Math.max(await this.spentThisMonth(request.originator), request.satoshis)
         return {
           decision: 'approve',
           mode: 'allowance',
-          allowanceSats: Math.max(allowance, request.satoshis),
+          allowanceSats,
           risk: 5,
-          reasons: [`Trusted merchant; issuing an on-chain allowance of ${Math.max(allowance, request.satoshis)} sats.`],
+          reasons: [`Trusted merchant; on-chain allowance set to ${allowanceSats} sats this month, exactly what it has been paid.`],
           judge: 'rules',
           findings
         }
@@ -232,6 +237,12 @@ export class Guardian {
     }
   }
 
+  /** What the wallet has already paid this merchant this month, as the permissions manager counts it. */
+  private async spentThisMonth(originator: string): Promise<number> {
+    const byOriginator = { originator, rawOriginator: originator } as PermissionToken
+    return await this.opts.manager.querySpentSince(byOriginator)
+  }
+
   private append(request: SpendRequest, intent: SpendIntent | undefined, verdict: Verdict): JournalEntry {
     const prevHash = this.journalRoot
     const body = {
@@ -242,9 +253,25 @@ export class Guardian {
       intent,
       verdict
     }
-    const hash = Utils.toHex(Hash.sha256(Utils.toArray(prevHash + JSON.stringify(body), 'utf8')))
-    const entry: JournalEntry = { ...body, prevHash, hash }
+    const entry: JournalEntry = { ...body, prevHash, hash: journalHash(prevHash, body) }
     this.journal.push(entry)
     return entry
   }
+}
+
+function journalHash(prevHash: string, body: Omit<JournalEntry, 'prevHash' | 'hash'>): string {
+  return Utils.toHex(Hash.sha256(Utils.toArray(prevHash + JSON.stringify(body), 'utf8')))
+}
+
+/**
+ * Recomputes the journal's hash chain from genesis. If it returns `ok`, `head` can be compared
+ * with the `guardianRoot` in a soul token to prove the whole decision history.
+ */
+export function verifyJournal(journal: JournalEntry[]): { ok: boolean; head: string; brokenAt?: number } {
+  let prev = GENESIS
+  for (const { prevHash, hash, ...body } of journal) {
+    if (prevHash !== prev || journalHash(prev, body) !== hash) return { ok: false, head: prev, brokenAt: body.seq }
+    prev = hash
+  }
+  return { ok: true, head: prev }
 }

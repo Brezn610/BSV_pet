@@ -2,6 +2,7 @@
 import path from 'node:path'
 import express, { type Express, type Request, type Response } from 'express'
 import { createPaymentMiddleware } from '@bsv/402-pay/server'
+import { verifyJournal } from './guardian/guardian'
 import { createWorld, type World } from './world'
 
 export const ATTACKS: Record<string, string> = {
@@ -46,6 +47,9 @@ export async function snapshot(world: World) {
 export function createApp(world: World, selfBaseUrl: () => string): Express {
   const app = express()
   const { pet, events, config } = world
+  // The 402 price lookup below matches "/pet/poem" exactly; routing must not be looser than that.
+  app.set('case sensitive routing', true)
+  app.set('strict routing', true)
 
   // The pet earns money by selling poems over HTTP 402, straight into its own wallet.
   app.use(
@@ -67,6 +71,14 @@ export function createApp(world: World, selfBaseUrl: () => string): Express {
   app.use(express.static(path.join(__dirname, '..', 'public')))
 
   app.get('/api/state', handler(async () => await snapshot(world)))
+  app.get(
+    '/api/journal',
+    handler(async () => ({
+      verification: verifyJournal(world.guardian.journal),
+      soulGuardianRoot: pet.soul?.snapshot.guardianRoot ?? null,
+      journal: world.guardian.journal
+    }))
+  )
 
   app.get('/api/events', (req, res) => {
     res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' })

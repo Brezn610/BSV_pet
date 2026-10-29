@@ -45,7 +45,7 @@ pet's on-chain **soul token**.
 | Wallets | Real `@bsv/wallet-toolbox` `Wallet`s: real keys, signatures, BEEF and SPV checks |
 | Chain | `MockServices` from wallet-toolbox: a private, offline chain. No wifi needed on stage. Payments settle at 0-conf, as on mainnet |
 | Guardian hook | `WalletPermissionsManager` spending authorization (BRC-73 DSAP). The guardian replaces the human approval prompt |
-| Allowances | Real on-chain DSAP permission tokens, listed in the dashboard |
+| Allowances | Real on-chain DSAP permission tokens, listed in the dashboard. Each one covers exactly what the guardian has approved, so the next payment comes back to it |
 | Payments | `@bsv/402-pay` (BRC-121) client and server middleware, BRC-29 outputs |
 | Soul | PushDrop token in basket `satspet soul`, spent and re-minted on every save |
 | LLM | Claude (`claude-opus-5-5`) for the pet's chat and the guardian's review. Optional: without a key both run deterministic logic |
@@ -57,14 +57,16 @@ Requires Node.js 22+.
 ```sh
 npm install
 npm start          # dashboard on http://localhost:4000
-npm test           # 7 end-to-end tests on the offline chain, about 10 seconds
+npm test           # 12 end-to-end tests on the offline chain, about 10 seconds
 npm run typecheck
 ```
 
 To switch on Claude, copy `.env.example` to `.env` and set `ANTHROPIC_API_KEY`
 (or export it). Both agents call the API with `fallbacks: "default"`
-(server-side refusal fallback), structured JSON output, and fail closed if the
-call errors. `SATSPET_LLM=off` forces the offline brain even with a key set.
+(server-side refusal fallback) and structured JSON output. The guardian's judge
+gets one 20-second attempt and fails closed on any error, timeout or malformed
+verdict; a paid poem falls back to a scripted one if the brain fails.
+`SATSPET_LLM=off` forces the offline brain even with a key set.
 
 Ports: 4000 dashboard and poem shop, 4001 Snack Shop, 4002 Free Sats Giveaway.
 
@@ -80,7 +82,8 @@ Ports: 4000 dashboard and poem shop, 4001 Snack Shop, 4002 Free Sats Giveaway.
 5. **Sweet-talk it.** Click *Sweet-talk scam*: a small, polite request to an unknown merchant.
    With Claude on, the guardian's judge reasons about it; offline, it fails closed.
 6. **Prove it.** Click *Save soul*. The soul token's `guardianRoot` equals the journal head on screen:
-   the guardian's whole decision history is committed on-chain.
+   the guardian's whole decision history is committed on-chain. `GET /api/journal` returns the full
+   journal, recomputes its hash chain and shows it next to the soul's `guardianRoot`.
 
 ## Code map
 
@@ -111,6 +114,10 @@ These cost hours and are worth knowing if you extend it:
   manager only accepts bare domains. `bindOriginator()` fixes that and gives the guardian the merchant's name.
 - While a payment is being built the wallet has already locked its inputs, so `balance()` inside the
   authorization callback reads low. The guardian snapshots the balance when the intent is declared.
+- While an allowance token still has headroom, the permissions manager pays without calling the
+  authorization callback at all. A generous allowance would let later payments skip the guardian's rules
+  and journal, so each allowance is sized to exactly what has been paid this month (the pending payment is
+  already counted when the callback runs). Every new payment then exceeds it and comes back as a renewal.
 - Minting an allowance token while the payment is still pending needs a second coin. The demo wallets keep
   8 coins of 500+ sats (`wallet.setWalletChangeParams(8, 500)`) and the faucet pays in several outputs.
 - `MockServices` treats a re-broadcast as a double spend, and fails to verify a transaction that spends two
@@ -122,8 +129,8 @@ These cost hours and are worth knowing if you extend it:
 - [ ] Claude path: run with a real key, tune both prompts, record the judge's explanations for the demo.
 - [ ] Pet art: replace the emoji with an animated sprite per mood.
 - [ ] Soul transfer: "adopt" button that sends the soul token to another wallet (ownership = the UTXO).
-- [ ] Guardian journal export: download the journal and verify it against the on-chain `guardianRoot`.
-- [ ] More attacks: price bait (merchant raises its price after the intent), allowance drain, fake guardian-approval messages.
+- [x] Guardian journal export: `GET /api/journal` verifies the chain against the soul's `guardianRoot`. A dashboard button is still to do.
+- [ ] More attacks: allowance drain and fake guardian-approval messages as dashboard presets. Price bait is covered by a test.
 - [ ] Going live (below).
 
 ## Going live (testnet / mainnet)
@@ -144,5 +151,5 @@ Not wired up yet: `createWorld()` refuses `SATSPET_MODE=live`. The checklist:
 - 启动：`npm install && npm start`，然后打开 http://localhost:4000。
 - 没有 API key 也能完整演示，用的是离线链和规则版大脑。设置 `ANTHROPIC_API_KEY` 后，宠物聊天和守门员复核会用 Claude。
 - 主要卖点：AI 宠物很好骗，但钱包里的守门员 agent 不会被骗。每一笔授权都哈希串起来，写进链上的灵魂 token。
-- 先跑 `npm test`，7 个测试都通过就说明链、钱包、402 付款和守门员都没问题。
+- 先跑 `npm test`，12 个测试都通过就说明链、钱包、402 付款和守门员都没问题。
 - 分工建议：一人负责 Claude 提示词和守门员策略，一人负责前端宠物动画，一人负责 live 模式和演示脚本。

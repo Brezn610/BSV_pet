@@ -35,10 +35,11 @@ export const config = {
     /** The guardian never lets the balance drop below this: it is the pet's life support. */
     reserveSats: num('GUARDIAN_RESERVE', 300),
     /**
-     * Trusted merchants get a recurring on-chain allowance (a BRC-73 DSAP token) of this
-     * size instead of one-off approvals. 0 makes the guardian review every single spend.
+     * Approvals for trusted merchants are recorded as an on-chain allowance (a BRC-73 DSAP token)
+     * sized to exactly what has been approved, so every payment still reaches the guardian.
+     * "off" approves them once instead.
      */
-    trustedAllowanceSats: num('GUARDIAN_TRUSTED_ALLOWANCE', 600)
+    issueAllowances: process.env.GUARDIAN_ALLOWANCES !== 'off'
   },
 
   claude: {

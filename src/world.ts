@@ -59,7 +59,7 @@ export async function createWorld(
       dailyBudgetSats: config.guardian.dailyBudgetSats,
       reserveSats: config.guardian.reserveSats
     },
-    trustedAllowanceSats: config.guardian.trustedAllowanceSats,
+    issueAllowances: config.guardian.issueAllowances,
     merchants: shops.map(s => s.profile),
     useClaude: config.claude.enabled
   })
@@ -98,7 +98,8 @@ export async function createWorld(
     shopWallets: [snackWallet, giveawayWallet],
     async visitorBuysPoem(petBaseUrl, topic) {
       const res = await visitorFetch(`${petBaseUrl}/pet/poem?topic=${encodeURIComponent(topic)}`)
-      const body = (await res.json()) as { poem?: string }
+      const body = (await res.json()) as { poem?: string; error?: string }
+      if (!res.ok) throw new Error(`Poem shop answered HTTP ${res.status}: ${body.error ?? 'no poem'}`)
       return { poem: body.poem ?? '', status: res.status }
     },
     async faucet(target, sats) {

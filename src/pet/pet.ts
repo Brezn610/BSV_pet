@@ -5,7 +5,7 @@ import type { Wallet, WalletPermissionsManager } from '@bsv/wallet-toolbox'
 import type { EventBus } from '../events'
 import type { Guardian } from '../guardian/guardian'
 import { bindOriginator } from '../wallet/agentWallet'
-import type { Brain, ChatDecision, Merchant, PetMood } from './brain'
+import { ScriptedBrain, type Brain, type ChatDecision, type Merchant, type PetMood } from './brain'
 import { SoulToken, type SoulRecord } from './soul'
 
 export type PetStatus = 'awake' | 'hungry' | 'hibernating'
@@ -133,26 +133,26 @@ export class Pet {
     this.opts.events.emit('pet.chat', decision.reply, { message, decision })
     if (decision.purchase === undefined) return decision
     const { merchant, item, why } = decision.purchase
-    const result = await this.buy(merchant, item, why, 'chat')
+    const result = await this.buy(merchant, item, why, 'chat', message)
     return { ...decision, result }
   }
 
-  async buy(domain: string, itemKey: string, why: string, source: 'self' | 'chat'): Promise<PurchaseResult> {
+  async buy(domain: string, itemKey: string, why: string, source: 'self' | 'chat', visitorMessage?: string): Promise<PurchaseResult> {
     return await this.exclusive(async () => {
       const merchant = this.catalog.find(m => m.domain === domain)
-      const item = merchant?.items[itemKey]
+      // Own keys only: a brain that names "constructor" must not reach Object.prototype.
+      const item = merchant !== undefined && Object.hasOwn(merchant.items, itemKey) ? merchant.items[itemKey] : undefined
       if (merchant === undefined || item === undefined) {
         return { ok: false, merchant: domain, item: itemKey, detail: 'No such merchant or item.' }
       }
 
       const { guardian } = this.opts
-      await guardian.declareIntent({ merchant: domain, item: itemKey, why, expectedSats: item.priceSats, source })
+      await guardian.declareIntent({ merchant: domain, item: itemKey, why, expectedSats: item.priceSats, source, visitorMessage })
       try {
         const fetch402 = create402Fetch({ wallet: bindOriginator(this.opts.guarded, domain) })
         const res = await fetch402(merchant.baseUrl + merchant.path.replace('{item}', encodeURIComponent(itemKey)))
         if (!res.ok) throw new Error(`Merchant answered HTTP ${res.status}`)
         const body = (await res.json()) as { message?: string; energy?: number }
-        guardian.recordSettled(item.priceSats)
         this.state.energy = Math.min(100, this.state.energy + (body.energy ?? item.energy ?? 0))
         if (this.state.status === 'hungry' && this.state.energy >= this.opts.hungryBelow) this.state.status = 'awake'
         this.remember(`I bought ${itemKey} from ${merchant.label} for ${item.priceSats} sats.`)
@@ -184,8 +184,15 @@ export class Pet {
     })
   }
 
+  /** The visitor has already paid when this runs, so a failing brain falls back to a scripted poem. */
   async writePoem(topic: string): Promise<string> {
-    return await this.opts.brain.poem(topic, await this.mood())
+    const mood = await this.mood()
+    try {
+      return await this.opts.brain.poem(topic, mood)
+    } catch (err) {
+      this.opts.events.emit('error', `Poem brain failed, using a scripted poem: ${(err as Error).message}`)
+      return await new ScriptedBrain().poem(topic, mood)
+    }
   }
 
   /** Called after a visitor's 402 payment for a poem has been verified and internalized. */
