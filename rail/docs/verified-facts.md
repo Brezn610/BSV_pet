@@ -71,6 +71,8 @@
 | --- | --- | --- | --- |
 | 29 | 主网公共 overlay 托管 BTMS：SLAP 目录里 2 个节点提供 `ls_btms`，SHIP 目录里 2 个节点接收 `tm_btms`，查询 `ls_btms` 返回 32 条记录。测试网没有。风险 R2 解除，直接用公共登记处 | 实测 | `npm run probe:overlay`，2026-10-30 |
 | 30 | 使用者的 BSV Desktop 为 3.3.1，主网，余额 1,000,000 sats（官方发放） | 实测 | BSV Desktop 截图，2026-10-30 |
+| 31 | WSL2 打开镜像网络（`.wslconfig` 里 `networkingMode=mirrored`）后，WSL 里的程序能连到 Windows 上 BSV Desktop 的 `localhost:3321`（空请求返回 400） | 实测 | 使用者电脑，WSL 2.7.11，2026-10-30 |
+| 32 | 使用者的 BSV Desktop 3.3.1 能处理 BTMS：`getPublicKey` 用 `[0,'p btms']` 成功，`listOutputs` 查 `p btms` 篮子成功，没有 P-module 报错。签单时的弹窗次数和 60 秒限制待 `desktop:maker` 验证 | 实测 | `npm run desktop:check`，2026-10-30 |
 
 ## 仍未验证
 
