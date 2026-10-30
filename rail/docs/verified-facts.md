@@ -78,6 +78,10 @@
 | 35 | 原因：主网只有一个 BTMS 节点（`backend.01545c29f0fd3c5cb03921d8b1a3ce01.projects.babbage.systems`，SHIP 目录里登记了两次）。sdk 3.2.1 的 `TopicBroadcaster` 发送 `X-Topics: tm_btms`，节点按 JSON 解析失败返回 HTTP 400；改用旧格式 `["tm_btms"]` 返回 200，并承认了发行 `[0]` 和拆份 `[0,1,2,3]`。所以用 AGENTS.md 锁定的 sdk 版本，连官方 BTMS 库都提交不上去。修复：`src/registry/publicOverlay.ts` 的 `LegacyTopicsFacilitator` | 实测 | `npm run diagnose:overlay`，2026-10-30；SDK 注释见 `@bsv/sdk/dist/cjs/src/overlay-tools/SHIPBroadcaster.js` 的 `send` |
 | 36 | 用旧格式请求头重新提交已登记过的交易，节点接受请求但不确认任何新输出，SDK 报 `ERR_REQUIRE_ACK_FROM_ANY_HOST_FAILED`；这是重复提交的正常表现，不是错误 | 实测 | `npm run overlay:check`，2026-10-30 |
 | 37 | `ls_btms` 按 `{txid, outputIndex}` 查询时，已被花掉的代币输出也返回 found（发行输出已在拆份中花掉，仍 found）。所以“查得到”只证明来历合法，不证明未花费；未花费要另查，或依赖成交时的双花拒绝 | 实测 | 同上 |
+| 38 | 主网服务端钱包可用：wallet-toolbox 2.14.9 + SQLite + Arcade 广播。BSV Desktop 用 BRC-29 给 agent 转 20000 sats（txid `78d187d8752af06412e928dd2cf07ac972c4bb01348a9f2442a1d05d329d33c2`），agent 钱包 `internalizeAction` 入账，余额 20000 | 实测 | `npm run agent:fund`，2026-10-30 |
+| 39 | 第一笔主网“换币即付款”成交：txid `ee2a38964df993af6cd48f5f51d1ce0c07c7bf454363735341288d7f71bf8e8c`。一笔交易里 agent 接下做市方预签的报价单，付做市方 1000 sats，1 pUSD 直接给商家（输出 1）。守门员收到 1066 sats 的请求（输出 1001 + 手续费 65），与报备意图一致后放行；agent 余额 20000 → 18934 | 实测 | `npm run agent:fill`，2026-10-30 |
+| 40 | 商家用旧格式请求头把成交提交给公共 `tm_btms`，节点回的 STEAK 承认了商家的 pUSD 输出，商家随后入账；BSV Desktop 作为做市方收下 1000 sats。R1 在主网端到端跑通 | 实测 | 同上 |
+| 41 | 预览时 `BTMSTopicManager` 打印 `Skipping output 0: script.chunks[0].data must have value`：输出 0 是付给做市方的 P2PKH，不是代币，登记规则跳过它，属正常 | 实测 | 同上 |
 
 ## 仍未验证
 

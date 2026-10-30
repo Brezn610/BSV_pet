@@ -63,7 +63,7 @@ CONFIRM_MAINNET=1 npm run agent:fill     # agent 经守门员接单付款 → �
 | `src/chain/mockChain.ts`、`src/wallet/agentWallet.ts` | 离线链、钱包包装 | 从 BSV_pet 拷贝 |
 | `spikes/` | 审查实验和 overlay 探测脚本 | 可运行 |
 | `src/chain/serverWallet.ts`、`src/env.ts` | 主网服务端钱包（agent、商家），私钥从 `.env` 读 | 第 ④ 步用 |
-| `scripts/` | 连 BSV Desktop 的检查、做市方冒烟测试、agent 充值和主网成交 | ③ 已跑通，④ 待在本地运行 |
+| `scripts/` | 连 BSV Desktop 的检查、做市方冒烟测试、agent 充值和主网成交 | ③ ④ 已在主网跑通 |
 
 ## 还没做（按设计文档的计划）
 
