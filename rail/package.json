@@ -12,7 +12,8 @@
     "probe:overlay": "tsx spikes/probe-overlay.ts",
     "typecheck": "tsc -p .",
     "desktop:check": "tsx scripts/desktop-check.ts",
-    "desktop:maker": "tsx scripts/maker-smoke.ts"
+    "desktop:maker": "tsx scripts/maker-smoke.ts",
+    "diagnose:overlay": "tsx spikes/overlay-diagnose.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

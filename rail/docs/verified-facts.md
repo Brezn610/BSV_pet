@@ -73,6 +73,8 @@
 | 30 | 使用者的 BSV Desktop 为 3.3.1，主网，余额 1,000,000 sats（官方发放） | 实测 | BSV Desktop 截图，2026-10-30 |
 | 31 | WSL2 打开镜像网络（`.wslconfig` 里 `networkingMode=mirrored`）后，WSL 里的程序能连到 Windows 上 BSV Desktop 的 `localhost:3321`（空请求返回 400） | 实测 | 使用者电脑，WSL 2.7.11，2026-10-30 |
 | 32 | 使用者的 BSV Desktop 3.3.1 能处理 BTMS：`getPublicKey` 用 `[0,'p btms']` 成功，`listOutputs` 查 `p btms` 篮子成功，没有 P-module 报错。签单时的弹窗次数和 60 秒限制待 `desktop:maker` 验证 | 实测 | `npm run desktop:check`，2026-10-30 |
+| 33 | 做市方冒烟测试在主网上跑通：用 BSV Desktop 发行 10 pUSD（`7715fbf4…13db8fe`）、拆成 1+1+1+7（`e95cc1cb…a9487985`），本地登记规则都承认；等 61 秒后通过 `WalletClient` 用 `PushDrop.unlock('single', true)` 预签报价单成功，`checkOffer` 通过。弹窗出现了几次，使用者没有计数 | 实测 | `npm run desktop:maker`，2026-10-30 |
+| 34 | 两笔交易提交公共 `tm_btms` 时都返回 `ERR_ALL_HOSTS_REJECTED`：两个节点都返回了 HTTP 错误，SDK 吞掉了具体原因。诊断中，见 `npm run diagnose:overlay` | 实测 | 同上 |
 
 ## 仍未验证
 
