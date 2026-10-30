@@ -25,7 +25,7 @@ GET /health                   free: price and accounts
   "verdict": 0,
   "label": "ignore",
   "reason": "one sentence",
-  "judgedBy": "claude | rules",
+  "judgedBy": "claude | deepseek | rules",
   "paidSats": 100,
   "txid": "<the BSV payment>",
   "signedBy": { "airnode": "0x7B02…1CCB", "requestHash": "0x783a…95e9", "timestamp": "…", "signature": "0x…" }
@@ -38,17 +38,18 @@ GET /health                   free: price and accounts
 
 1. The paying agent calls `GET /verdict/WhiteHouse`. The 402 middleware asks for 100 sats; the agent's wallet pays with a BRC-29 output and retries; the analyst's server wallet takes the payment in.
 2. The analyst buys the account's newest post from the TwitterAPI.io Airnode on AirnodeHub (x402, $0.01 in aUSD on Base Sepolia) and checks the signature against the signer and request hash in `api3/deployments.json`, with the API3 part's own verifier. The same post is served for 60 seconds, so repeated calls do not burn the shared upstream quota.
-3. Claude judges the post when `ANTHROPIC_API_KEY` is set (`judgedBy: "claude"`); otherwise, or if Claude fails, keyword rules do (`judgedBy: "rules"`). The post text is treated as untrusted data.
+3. A model judges the post: Claude when `ANTHROPIC_API_KEY` is set (`judgedBy: "claude"`), otherwise DeepSeek (`deepseek-flash`, DeepSeek-V4.1-Flash, thinking off) when `DEEPSEEK_API_KEY` is set (`judgedBy: "deepseek"`). Without a key, or if the model fails, keyword rules do (`judgedBy: "rules"`), and the server log says why. The post text is treated as untrusted data.
 4. The response carries the Airnode signature, so anyone can check that the post was not edited on the way. A signature proves who posted what and when, not that the post is true; TreasuryGuard caps what a news verdict can move (at most 25%).
 
 ## On mainnet
 
-The analyst runs from `npm run analyst` behind a public HTTPS tunnel. Two real paid calls, from one of our server wallets acting as the agent:
+The analyst runs from `npm run analyst` behind a public HTTPS tunnel. Real paid calls, from one of our server wallets acting as the agent:
 
 | Call | Payment |
 |---|---|
 | `GET /verdict/WhiteHouse` (localhost) | [0be2e9f4…](https://whatsonchain.com/tx/0be2e9f4e61b19bf2f5053723a6be5884fd6fed6d39f45c499b8c74aa948eaa7) |
 | `GET /verdict/federalreserve` (through the public HTTPS tunnel) | [f0cc4395…](https://whatsonchain.com/tx/f0cc43959e092dc75c7ea1b1fdae7b7d76402e67c33b42fb8963865ab628adc2) |
+| `GET /verdict/WhiteHouse` (public tunnel, judged by DeepSeek) | [9cc280fb…](https://whatsonchain.com/tx/9cc280fb7eb50678300254b2be6bf9c8b2f480d22a920db0c471622e900c13d1) |
 
 ## Run it
 
@@ -63,7 +64,7 @@ CONFIRM_MAINNET=1 npm run analyst:pay      # one paid call from a server wallet;
 
 The live demo, with fallbacks, is in [demo-analyst.md](./demo-analyst.md).
 
-Settings: `ANALYST_PORT` (default 4402), `ANALYST_PRICE_SATS` (default 100, at most 500), `ANTHROPIC_API_KEY` and `RAIL_MODEL` for Claude. Every paid call is appended to `data/analyst-payments.jsonl` (gitignored).
+Settings: `ANALYST_PORT` (default 4402), `ANALYST_PRICE_SATS` (default 100, at most 500), `ANTHROPIC_API_KEY` and `RAIL_MODEL` for Claude, `DEEPSEEK_API_KEY` and `DEEPSEEK_MODEL` for DeepSeek. The npm scripts run Node with `--use-system-ca`, so HTTPS also works behind an antivirus that inspects TLS (Kaspersky on the demo laptop). Every paid call is appended to `data/analyst-payments.jsonl` (gitignored).
 
 ## Code
 
@@ -71,7 +72,7 @@ Settings: `ANALYST_PORT` (default 4402), `ANALYST_PRICE_SATS` (default 100, at m
 |---|---|
 | `src/analyst/server.ts` | The 402 routes; validation before any charge |
 | `src/analyst/api3Post.ts` | The newest signed post of a whitelisted account, verified with the API3 code, cached for 60 s |
-| `src/analyst/verdict.ts` | Claude's verdict with a keyword-rule fallback |
+| `src/analyst/verdict.ts` | Claude's or DeepSeek's verdict, with a keyword-rule fallback |
 | `scripts/analyst-mainnet.ts` | The mainnet server with its own server wallet |
 | `scripts/analyst-pay.ts` | One paid call from a server wallet |
 | `test/analyst.test.ts`, `test/analystGet.test.ts` | 402, paid answers, replay refused, unknown accounts refused before payment, a real signed post verified and a forged one rejected |

@@ -9,7 +9,7 @@ What the jury sees in about 60 seconds: an AI agent pays the Analyst 100 sats on
 - [ ] `curl https://<tunnel>/health` returns `{"ok":true,"priceSats":100,...}`.
 - [ ] `curl -i https://<tunnel>/verdict/WhiteHouse` returns `402` with `x-bsv-sats: 100`.
 - [ ] The paying wallet has at least 1,000 sats. A rehearsal call (`CONFIRM_MAINNET=1 npm run analyst:pay`) prints the balance before and after.
-- [ ] If Claude is meant to judge: `ANTHROPIC_API_KEY` is in `rail/.env`, the server was restarted after it was added, and one paid call returned `"judgedBy": "claude"`.
+- [ ] The server's start line says `Judge: DeepSeek (deepseek-flash)` (or Claude), and a rehearsal call returned `"judgedBy": "deepseek"`. If it returned `rules`, the server log line `analyst model failed…` says why.
 - [ ] These tabs are open: WhatsOnChain (with the two earlier payments, as a fallback), `rail/docs/analyst.md`, and a terminal in `rail/`.
 
 ## The demo
@@ -34,7 +34,8 @@ What the jury sees in about 60 seconds: an AI agent pays the Analyst 100 sats on
 |---|---|
 | The tunnel is down or its URL changed | Restart `cloudflared` and use the new URL, or demo on `http://localhost:4402`. |
 | `502` from the analyst | The AirnodeHub or x402 upstream is down. Show the two recorded mainnet payments in `analyst.md`, then rerun later. |
-| Claude errors or is slow | The server falls back to keyword rules by itself (`judgedBy: "rules"`), so the call still succeeds. |
+| The model errors or is slow | The server falls back to keyword rules by itself (`judgedBy: "rules"`), so the call still succeeds. |
+| `fetch failed` / `SELF_SIGNED_CERT_IN_CHAIN` in the log | An antivirus is inspecting TLS. Start the server with `npm run analyst` (it passes `--use-system-ca`), not plain `tsx`. |
 | The payer has too few sats | Use `ANALYST_PAYER=cdp-reserve`, or top up the payer from BSV Desktop. |
 | No network | Run `npm test`: the analyst tests show 402, payment, replay refused and signature checks offline. |
 

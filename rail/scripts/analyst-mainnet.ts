@@ -10,6 +10,7 @@ import path from 'node:path'
 import { PrivateKey } from '@bsv/sdk'
 import { api3PostSource, deployedTweetFeeds } from '../src/analyst/api3Post'
 import { startAnalyst } from '../src/analyst/server'
+import { deepseekEnabled } from '../src/analyst/verdict'
 import { openServerWallet } from '../src/chain/serverWallet'
 import { config } from '../src/config'
 import { DATA_DIR, ENV_FILE, loadEnv, requireEnv } from '../src/env'
@@ -55,7 +56,12 @@ async function main(): Promise<void> {
 
   console.log(`Analyst identity ${analyst.identityKey}, balance ${await analyst.wallet.balance()} sats`)
   console.log(`Listening on ${running.url}: GET /verdict/<${accounts.join('|')}> for ${PRICE_SATS} sats`)
-  console.log(`Judge: ${config.claude.enabled ? `Claude (${config.claude.model})` : 'keyword rules (set ANTHROPIC_API_KEY for Claude)'}`)
+  const judge = config.claude.enabled
+    ? `Claude (${config.claude.model})`
+    : deepseekEnabled()
+      ? `DeepSeek (${process.env.DEEPSEEK_MODEL ?? 'deepseek-flash'})`
+      : 'keyword rules (set ANTHROPIC_API_KEY or DEEPSEEK_API_KEY for a model)'
+  console.log(`Judge: ${judge}, keyword rules if it fails`)
   console.log('Ctrl+C to stop.')
 
   const stop = async (): Promise<void> => {
