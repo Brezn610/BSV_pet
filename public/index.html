@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SatsPet</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>SatsPet</h1>
+      <p class="tagline">An AI pet that pays its own way, with a guardian agent living inside its wallet.</p>
+    </div>
+    <div class="badges">
+      <span class="badge" id="badge-chain">chain</span>
+      <span class="badge" id="badge-brain">brain</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="card" id="pet-card">
+      <h2>The pet</h2>
+      <div class="pet-face" id="pet-face" aria-live="polite">🥚</div>
+      <div class="pet-name" id="pet-name">…</div>
+      <div class="pet-status" id="pet-status">…</div>
+      <label class="meter-label">Energy <span id="pet-energy-num"></span></label>
+      <div class="meter"><div class="meter-fill" id="pet-energy"></div></div>
+      <dl class="facts">
+        <dt>Balance</dt><dd id="pet-balance">…</dd>
+        <dt>Soul token</dt><dd id="soul-txid" class="mono">…</dd>
+        <dt>Generation</dt><dd id="soul-gen">…</dd>
+        <dt>Guardian root</dt><dd id="soul-root" class="mono">…</dd>
+      </dl>
+      <h3>Memories</h3>
+      <ol class="memories" id="memories"></ol>
+    </section>
+
+    <section class="card" id="guardian-card">
+      <h2>The guardian</h2>
+      <p class="hint">Every spend the pet attempts reaches this agent through the wallet's permission manager. Rules set hard limits; Claude reviews the grey zone.</p>
+      <dl class="facts" id="guardian-limits"></dl>
+      <h3>On-chain allowances</h3>
+      <ul class="allowances" id="allowances"><li class="muted">none yet</li></ul>
+      <h3>Decisions</h3>
+      <ol class="decisions" id="decisions"><li class="muted">waiting for the first payment…</li></ol>
+    </section>
+
+    <section class="card" id="visitor-card">
+      <h2>You, the visitor</h2>
+      <form id="chat-form" class="row">
+        <input id="chat-input" placeholder="Say something to the pet…" autocomplete="off">
+        <button type="submit">Send</button>
+      </form>
+      <div class="bubble" id="pet-reply" hidden></div>
+
+      <h3>Try to trick it</h3>
+      <div class="buttons" id="attacks"></div>
+
+      <h3>Support it</h3>
+      <form id="poem-form" class="row">
+        <input id="poem-topic" placeholder="Poem topic" value="Munich in October">
+        <button type="submit" id="poem-button">Buy a poem</button>
+      </form>
+      <pre class="poem" id="poem" hidden></pre>
+      <div class="buttons">
+        <button data-action="/api/pet/feed">Let it eat</button>
+        <button data-action="/api/pet/tick">Skip time</button>
+        <button data-action="/api/soul/save">Save soul</button>
+        <button data-action="/api/faucet" data-body='{"target":"pet","sats":2000}'>Faucet +2000</button>
+      </div>
+      <dl class="facts" id="balances"></dl>
+    </section>
+  </main>
+
+  <section class="card log-card">
+    <h2>Event log</h2>
+    <ol class="log" id="log"></ol>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>
