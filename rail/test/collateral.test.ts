@@ -57,13 +57,18 @@ after(async () => {
 })
 
 /** The watcher: run the check first, sign only if it passes. */
-const watcherThat = (check: (tx: Transaction) => void): WatcherApproval => async (tx, inputIndex) => {
-  check(tx)
+const watcherThat = (check: (tx: Transaction) => void | Promise<void>): WatcherApproval => async (tx, inputIndex) => {
+  await check(tx)
   return await signDigest(watcher.wallet, watcherKey, sighash(tx, inputIndex))
 }
 
 const lock = async (): Promise<LockedCollateral> => {
-  const locked = await lockCollateral(owner.wallet, COLLATERAL_SATS, { liquidator: liquidatorKey.publicKey, watcher: watcherKey.publicKey })
+  const locked = await lockCollateral(
+    owner.wallet,
+    COLLATERAL_SATS,
+    { liquidator: liquidatorKey.publicKey, watcher: watcherKey.publicKey },
+    { liquidatorIdentityKey: liquidator.identityKey }
+  )
   book.open(locked.outpoint, owner.identityKey, BigInt(COLLATERAL_SATS))
   return locked
 }
@@ -112,28 +117,53 @@ test('a liquidation repays the reserve and pays the owner the rest, in one trans
     ownerSats,
     liquidatorKey
   }
-  const expected = { assetId: pusd.assetId, debtUnits: 6_000, reservePublicKey: repayInvoice.publicKey, ownerSats }
+  assert.ok(locked.payout !== undefined)
+  const expected = {
+    assetId: pusd.assetId,
+    debtUnits: 6_000,
+    reservePublicKey: repayInvoice.publicKey,
+    ownerSats,
+    ownerLockingScript: locked.payout.lockingScript,
+    tokenIsLive: (outpoint: string) => registry.isLive(outpoint)
+  }
+  const watcherChecks = watcherThat(async tx => await checkLiquidationTx(tx, expected))
 
   // A liquidator that shortchanges the owner gets no watcher signature, and nothing moves.
+  await assert.rejects(liquidateCollateral(liquidator.wallet, { ...plan, ownerSats: ownerSats - 1 }, watcherChecks), /less than their share/)
+
+  // Nor does one that pays the full share to a key of its own choosing instead of the owner's.
+  await assert.rejects(liquidateCollateral(liquidator.wallet, { ...plan, locked: { ...locked, payout: undefined } }, watcherChecks), /does not go to the owner/)
+
+  // Nor does one whose pUSD the registry does not know (forged or already spent).
   await assert.rejects(
-    liquidateCollateral(liquidator.wallet, { ...plan, ownerSats: ownerSats - 1 }, watcherThat(tx => checkLiquidationTx(tx, expected))),
-    /less than their share/
+    liquidateCollateral(liquidator.wallet, plan, watcherThat(async tx => await checkLiquidationTx(tx, { ...expected, tokenIsLive: () => false }))),
+    /not live on the token registry/
   )
 
   const liquidatorBefore = await liquidator.wallet.balance()
   const ownerBefore = await owner.wallet.balance()
-  const done = await liquidateCollateral(liquidator.wallet, plan, watcherThat(tx => checkLiquidationTx(tx, expected)))
+  const done = await liquidateCollateral(liquidator.wallet, plan, watcherChecks)
 
   // The reserve takes its pUSD back through the registry.
   await acceptPayment(reserve.wallet, repayInvoice, done.atomicBeef, registry)
   assert.ok(registry.wasSpent(pusd.outpoint))
 
-  // The owner takes in their share.
-  assert.ok(done.payout !== undefined)
+  // The owner takes in their share with the derivation they fixed at lock time, needing nothing from the liquidator.
+  assert.equal(done.tx.outputs[1].lockingScript.toHex(), locked.payout.lockingScript)
   await owner.wallet.internalizeAction({
     tx: done.atomicBeef,
     description: 'Liquidation refund',
-    outputs: [{ outputIndex: 1, protocol: 'wallet payment', paymentRemittance: done.payout.remittance }]
+    outputs: [
+      {
+        outputIndex: 1,
+        protocol: 'wallet payment',
+        paymentRemittance: {
+          derivationPrefix: locked.payout.derivationPrefix,
+          derivationSuffix: locked.payout.derivationSuffix,
+          senderIdentityKey: locked.payout.liquidatorIdentityKey
+        }
+      }
+    ]
   })
   assert.equal((await owner.wallet.balance()) - ownerBefore, ownerSats)
 

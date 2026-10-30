@@ -36,7 +36,7 @@ import { circulatingUnits, issueReserve, receivedToken, transferToken } from '..
 import { openServerWallet, type ServerWallet } from '../src/chain/serverWallet'
 import { DATA_DIR, ENV_FILE, loadEnv, requireEnv } from '../src/env'
 import { acceptPayment, createInvoice, invoiceTerms } from '../src/merchant/invoice'
-import { PublicOverlayRegistry } from '../src/registry/publicOverlay'
+import { PublicOverlayRegistry, isOnPublicOverlay } from '../src/registry/publicOverlay'
 import { bytes, randomDerivation } from '../src/token/pusd'
 import type { OwnedToken } from '../src/token/split'
 
@@ -178,7 +178,9 @@ async function cmdLock(state: State): Promise<void> {
   const owner = await desktop()
   const keys = await vaultKeys()
   console.log(`Approve the BSV Desktop prompts: a key for the vault, then ${satoshis} sats...`)
-  const locked = await lockCollateral(owner, satoshis, keys, { originator: ORIGINATOR })
+  // The owner fixes where a liquidation must pay their share: a BRC-29 key of their own, checked by the watcher.
+  const liquidatorIdentityKey = PrivateKey.fromHex(requireEnv(KEYS.liquidator)).toPublicKey().toString()
+  const locked = await lockCollateral(owner, satoshis, keys, { originator: ORIGINATOR, liquidatorIdentityKey })
   const book = PositionBook.fromJSON(state.book)
   book.open(locked.outpoint, owner.identityKey, BigInt(satoshis))
   state.book = book.toJSON()
@@ -325,14 +327,22 @@ async function cmdLiquidate(state: State): Promise<void> {
         const decided = book.liquidate(outpoint, price)
         const ownerSats = Number(decided.liquidation.ownerSats)
         const repayInvoice = await createInvoice(reserve.wallet, { assetId: token.assetId, amount: Number(units), metadata: token.metadata })
-        const expected = { assetId: token.assetId, debtUnits: Number(units), reservePublicKey: repayInvoice.publicKey, ownerSats }
+        const expected = {
+          assetId: token.assetId,
+          debtUnits: Number(units),
+          reservePublicKey: repayInvoice.publicKey,
+          ownerSats,
+          ownerLockingScript: state.vaults[outpoint].payout?.lockingScript,
+          // The pUSD that repays the debt must be admitted and unspent on the public BTMS overlay.
+          tokenIsLive: async (tokenOutpoint: string) => await isOnPublicOverlay(tokenOutpoint, 'mainnet')
+        }
         const approve = await watcherThat(watcher, () => undefined)
         const liquidatorKey = await deriveKey(liquidator.wallet, COLLATERAL_PROTOCOL, 'vault liquidator')
         const done = await liquidateCollateral(
           liquidator.wallet,
           { locked: state.vaults[outpoint], pusd: receivedToken(bought, toBot), reservePublicKey: repayInvoice.publicKey, ownerIdentityKey: owner.identityKey, ownerSats, liquidatorKey },
           async (tx, i) => {
-            checkLiquidationTx(tx, expected)
+            await checkLiquidationTx(tx, expected)
             return await approve(tx, i)
           }
         )

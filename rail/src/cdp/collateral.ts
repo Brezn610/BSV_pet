@@ -79,6 +79,20 @@ export interface LockedCollateral {
   beef: number[]
   keys: VaultKeys
   ownerKey: KeyRef
+  /**
+   * Where the owner's share of a liquidation must go, fixed by the owner at lock time: a BRC-29
+   * key only the owner's wallet can spend. The watcher checks the liquidation pays exactly this
+   * script, so a liquidator cannot redirect the owner's share.
+   */
+  payout?: OwnerPayoutTarget
+}
+
+export interface OwnerPayoutTarget {
+  lockingScript: string
+  derivationPrefix: string
+  derivationSuffix: string
+  /** The liquidator's identity key: the BRC-29 counterparty of the payment. */
+  liquidatorIdentityKey: string
 }
 
 /** The owner locks `satoshis` of BSV as collateral, from their own wallet (BSV Desktop in production). */
@@ -86,11 +100,27 @@ export async function lockCollateral(
   owner: WalletInterface,
   satoshis: number,
   keys: { liquidator: string; watcher: string },
-  options: { originator?: string } = {}
+  options: { originator?: string; liquidatorIdentityKey?: string } = {}
 ): Promise<LockedCollateral> {
   if (!Number.isSafeInteger(satoshis) || satoshis <= 0) throw new Error(`Invalid collateral ${satoshis}`)
   const ownerKey = await deriveKey(owner, COLLATERAL_PROTOCOL, Utils.toBase64(Random(16)), options.originator)
   const vaultKeys: VaultKeys = { owner: ownerKey.publicKey, ...keys }
+  let payout: OwnerPayoutTarget | undefined
+  if (options.liquidatorIdentityKey !== undefined) {
+    // The recipient's side of BRC-29: the same key the liquidator will derive with the owner as counterparty.
+    const derivationPrefix = Utils.toBase64(Random(16))
+    const derivationSuffix = Utils.toBase64(Random(16))
+    const { publicKey } = await owner.getPublicKey(
+      { protocolID: BRC29_PROTOCOL, keyID: `${derivationPrefix} ${derivationSuffix}`, counterparty: options.liquidatorIdentityKey, forSelf: true },
+      options.originator
+    )
+    payout = {
+      lockingScript: new P2PKH().lock(PublicKey.fromString(publicKey).toAddress()).toHex(),
+      derivationPrefix,
+      derivationSuffix,
+      liquidatorIdentityKey: options.liquidatorIdentityKey
+    }
+  }
   const created = await owner.createAction(
     {
       description: 'Lock BSV as pUSD collateral',
@@ -100,7 +130,7 @@ export async function lockCollateral(
     options.originator
   )
   if (created.tx === undefined || created.txid === undefined) throw new Error('Wallet did not return the lock transaction')
-  return { outpoint: `${created.txid}.0`, satoshis, beef: bytes(created.tx), keys: vaultKeys, ownerKey }
+  return { outpoint: `${created.txid}.0`, satoshis, beef: bytes(created.tx), keys: vaultKeys, ownerKey, payout }
 }
 
 /** The BIP-143 digest a signature over input `inputIndex` of `tx` commits to. */
@@ -215,10 +245,12 @@ export async function ownerPayout(
   liquidator: WalletInterface,
   ownerIdentityKey: string,
   satoshis: number,
-  originator?: string
+  originator?: string,
+  /** The derivation the owner fixed at lock time; without it a fresh one is picked. */
+  derivation?: { derivationPrefix: string; derivationSuffix: string }
 ): Promise<OwnerPayout> {
-  const derivationPrefix = Utils.toBase64(Random(16))
-  const derivationSuffix = Utils.toBase64(Random(16))
+  const derivationPrefix = derivation?.derivationPrefix ?? Utils.toBase64(Random(16))
+  const derivationSuffix = derivation?.derivationSuffix ?? Utils.toBase64(Random(16))
   const { publicKey } = await liquidator.getPublicKey(
     { protocolID: BRC29_PROTOCOL, keyID: `${derivationPrefix} ${derivationSuffix}`, counterparty: ownerIdentityKey },
     originator
@@ -262,7 +294,9 @@ export async function liquidateCollateral(
   const protocol = options.protocol ?? tokenProtocol()
   const inputBEEF = Beef.fromBinary(plan.locked.beef)
   inputBEEF.mergeBeef(plan.pusd.beef)
-  const payout = plan.ownerSats > 0 ? await ownerPayout(liquidator, plan.ownerIdentityKey, plan.ownerSats, options.originator) : undefined
+  // Pay the owner where they asked at lock time, so the watcher can check the recipient.
+  const payout =
+    plan.ownerSats > 0 ? await ownerPayout(liquidator, plan.ownerIdentityKey, plan.ownerSats, options.originator, plan.locked.payout) : undefined
   const outputs = [
     {
       satoshis: 1,
@@ -304,14 +338,38 @@ export async function liquidateCollateral(
   return { ...spent, payout }
 }
 
+export interface LiquidationExpectation {
+  assetId: string
+  debtUnits: number
+  reservePublicKey: string
+  ownerSats: number
+  /** The owner's payout script fixed at lock time; when given, output 1 must pay exactly it. */
+  ownerLockingScript?: string
+  /**
+   * Whether a token outpoint is admitted and unspent on the token registry (the public BTMS overlay
+   * on mainnet). When given, the pUSD that repays the debt is checked before the watcher signs.
+   */
+  tokenIsLive?: (outpoint: string) => boolean | Promise<boolean>
+}
+
 /**
- * What the watcher checks before co-signing a liquidation: output 0 returns at least the debt in
- * pUSD of the right asset to the reserve key, and output 1 pays the owner at least their share.
+ * What the watcher checks before co-signing a liquidation:
+ * - input 1 is pUSD of the reserve asset worth at least the debt and, if a registry is given,
+ *   genuine and unspent there (a fake or spent token must not release the collateral);
+ * - output 0 returns at least the debt in that pUSD to the reserve key;
+ * - output 1 pays the owner at least their share, to the script they fixed at lock time.
  */
-export function checkLiquidationTx(
-  tx: Transaction,
-  expected: { assetId: string; debtUnits: number; reservePublicKey: string; ownerSats: number; ownerLockingScript?: string }
-): void {
+export async function checkLiquidationTx(tx: Transaction, expected: LiquidationExpectation): Promise<void> {
+  const input = tx.inputs[1]
+  const source = input?.sourceTransaction?.outputs[input.sourceOutputIndex]
+  const paid = source === undefined ? undefined : decodeToken(source.lockingScript.toHex())
+  if (paid === undefined || paid.assetId !== expected.assetId) throw new Error('input 1 is not pUSD of the reserve asset')
+  if (paid.amount < expected.debtUnits) throw new Error('input 1 holds less pUSD than the debt')
+  if (expected.tokenIsLive !== undefined) {
+    const outpoint = `${input.sourceTXID ?? input.sourceTransaction!.id('hex')}.${input.sourceOutputIndex}`
+    if (!(await expected.tokenIsLive(outpoint))) throw new Error('input 1 pUSD is not live on the token registry')
+  }
+
   const repaid = decodeToken(tx.outputs[0]?.lockingScript.toHex() ?? '')
   if (repaid === undefined || repaid.assetId !== expected.assetId) throw new Error('output 0 is not pUSD of the reserve asset')
   if (repaid.lockingPublicKey !== expected.reservePublicKey) throw new Error('output 0 does not go back to the reserve')

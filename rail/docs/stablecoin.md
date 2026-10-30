@@ -5,7 +5,7 @@
 > 1. **No owner-only exit.** Every path of the collateral script needs the watcher's signature; if the watcher goes offline, loses its key or refuses, the owner's BSV stays locked.
 > 2. **The team can move collateral.** The watcher and the liquidator are both team server keys; together they can spend the collateral without the owner. Only the watcher software prevents it, which in practice is custody.
 > 3. **Liquidation is not permissionless.** The liquidator key is fixed in each vault script, so only the team's bot can liquidate.
-> 4. **Two fixable gaps:** the mainnet liquidation checks the owner's share by amount, not by recipient; and the repaying pUSD is verified by the reserve only after the watcher has signed.
+> 4. **Two gaps, now fixed in code** (after the mainnet run below, which predates them): the owner now fixes the BRC-29 key for their liquidation share when they lock, and the watcher refuses any liquidation that pays a different script; and the watcher checks the repaying pUSD (asset, amount, and admitted and unspent on the public BTMS overlay) *before* it signs. Both have tests.
 >
 > The root cause is that BSV script cannot see the debt, the price or where outputs go, and has no covenants or usable timelocks: on Ethereum a contract enforces DAI's rules without trust, on BSV today someone has to. We keep this work because it uses the BSV stack deeply (a BTMS reserve, a custom vault script, an atomic multi-party liquidation) and gives a concrete answer to "why does BSV need covenants?". The submission's core is the owner-exit vault, the API3-bounded watcher, the LLM agent paying over HTTP 402 (see [analyst.md](./analyst.md)) and swap-and-pay.
 

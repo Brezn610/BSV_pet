@@ -80,7 +80,12 @@ async function main(): Promise<void> {
 
   heading('The owner locks 5 BSV as collateral')
   const price20 = signedPrice(20)
-  const locked = await lockCollateral(owner.wallet, COLLATERAL_SATS, { liquidator: liquidatorKey.publicKey, watcher: watcherKey.publicKey })
+  const locked = await lockCollateral(
+    owner.wallet,
+    COLLATERAL_SATS,
+    { liquidator: liquidatorKey.publicKey, watcher: watcherKey.publicKey },
+    { liquidatorIdentityKey: liquidator.identityKey }
+  )
   book.open(locked.outpoint, owner.identityKey, BigInt(COLLATERAL_SATS))
   line(`vault ${short(locked.outpoint)} · ${bsv(COLLATERAL_SATS)} · worth ${dollars(collateralValueUsd(BigInt(COLLATERAL_SATS), price20.value))} at $20.00 (signed price)`)
   line('script: IF <owner> CHECKSIGVERIFY ELSE <liquidator> CHECKSIGVERIFY ENDIF <watcher> CHECKSIG')
@@ -145,9 +150,16 @@ async function main(): Promise<void> {
   const decided = book.liquidate(locked.outpoint, price16)
   const ownerSats = Number(decided.liquidation.ownerSats)
   const repayInvoice = await createInvoice(reserve.wallet, { assetId: botPusd.assetId, amount: 6_000, metadata: botPusd.metadata })
-  const expected = { assetId: botPusd.assetId, debtUnits: 6_000, reservePublicKey: repayInvoice.publicKey, ownerSats }
+  const expected = {
+    assetId: botPusd.assetId,
+    debtUnits: 6_000,
+    reservePublicKey: repayInvoice.publicKey,
+    ownerSats,
+    ownerLockingScript: locked.payout!.lockingScript,
+    tokenIsLive: (outpoint: string) => registry.isLive(outpoint)
+  }
   const watcherSigns: WatcherApproval = async (tx: Transaction, i: number) => {
-    checkLiquidationTx(tx, expected)
+    await checkLiquidationTx(tx, expected)
     return await signDigest(watcher.wallet, watcherKey, sighash(tx, i))
   }
   const plan = { locked, pusd: botPusd, reservePublicKey: repayInvoice.publicKey, ownerIdentityKey: owner.identityKey, ownerSats, liquidatorKey }
@@ -157,6 +169,12 @@ async function main(): Promise<void> {
     line('✗ a liquidation that shortchanges the owner went through (unexpected)')
   } catch (err) {
     line(`✓ a liquidation that shortchanges the owner by 1 sat: watcher refused (${(err as Error).message})`)
+  }
+  try {
+    await liquidateCollateral(liquidator.wallet, { ...plan, locked: { ...locked, payout: undefined } }, watcherSigns)
+    line("✗ a liquidation that pays the owner's share elsewhere went through (unexpected)")
+  } catch (err) {
+    line(`✓ a liquidation that sends the owner's share to another key: watcher refused (${(err as Error).message})`)
   }
 
   const liquidatorBefore = await liquidator.wallet.balance()
