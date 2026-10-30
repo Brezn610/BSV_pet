@@ -83,8 +83,22 @@ API3_PAYER_KEY=0x...
 npm run price:api3
 ```
 
+## On BSV mainnet
+
+The whole cycle ran once on BSV mainnet on 30 October 2026, with BSV Desktop as the owner and a live, paid, signed API3 price (`npm run cdp -- …`). Amounts are deliberately tiny.
+
+| Step | What happened | Transaction |
+|---|---|---|
+| Issue | 100,000 cents of pUSD issued once into the reserve, admitted by the public BTMS overlay | [a0416e6a…](https://whatsonchain.com/tx/a0416e6aeff43172e8831c4ca0029ec5344991e1921480b9c872eae428896118) |
+| Lock | 190,000 sats locked from BSV Desktop in the collateral vault script | [4d97d548…](https://whatsonchain.com/tx/4d97d5486b09f4152e8fc40372d8b2110e7bed767d90f3752d027ae7f36003e5) |
+| Mint | Signed BSV/USD $17.2522 (x402, aUSD on Base Sepolia); the owner signed the request in BSV Desktop, the watcher verified it; 2 cents of pUSD from the reserve to the owner | [704fb804…](https://whatsonchain.com/tx/704fb804577eda292e20e89022a5d01c60eaadbb80a3c734f3c996a31d7a8aca) |
+| Buy | The liquidator buys the 2 cents of pUSD it will repay (from BSV Desktop, the only holder) | [10ea43d8…](https://whatsonchain.com/tx/10ea43d8d75276d1a2f5159c84bfa2df78f18b4b636d95156da664c9df417004) |
+| Liquidate | One transaction at signed $17.2772: input 0 the vault, input 1 the pUSD; output 0 the pUSD back to the reserve, output 1 68,452 sats to the owner, the rest to the liquidator; fee 83 sats | [bd35aea0…](https://whatsonchain.com/tx/bd35aea0f246a738aa5f5e20c1602281ba9011e09bd0cbcda5a04b3e6f2146f1) |
+
+The liquidation used the **public demo threshold of 60%** (`CDP_DEMO_LIQUIDATION_LTV_BPS=6000`), printed by the script as such; at the 75% rule the same position was reported as not liquidatable. Afterwards the reserve held all 100,000 cents again and the book's debt was zero.
+
 ## What is real and what is not yet
 
-- **Real and tested:** every rule above, on the wallet toolbox's offline chain with the official BTMS admission rules, and the API3 signature check on a real signed CoinPaprika response.
-- **Not yet:** a run on BSV mainnet with BSV Desktop, the live x402 price call, and the contract's mint and liquidation intents on Base Sepolia. Until those are wired in, the position book applies the same rules on the BSV side.
+- **Real:** the BSV mainnet transactions above, the API3 signatures and x402 payments, and every rule above, also tested on the wallet toolbox's offline chain with the official BTMS admission rules.
+- **Not yet:** the TreasuryGuard contract on Base Sepolia knows SPEND and SWAP intents, not mint and liquidation intents. Until those are added, the position book applies the CDP rules on the BSV side, with the same signed price the contract accepts.
 - **Built during the event:** everything in this document was written on 30 October 2026, during the hackathon.
