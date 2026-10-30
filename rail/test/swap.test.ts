@@ -4,6 +4,9 @@ import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
 import { BTMS } from '@bsv/btms'
 import { MockChain, type MockWallet } from '../src/chain/mockChain'
+import { config } from '../src/config'
+import { EventBus } from '../src/events'
+import { Guardian } from '../src/guardian/guardian'
 import { acceptPayment, createInvoice, invoiceTerms, paymentLockingScript, type Invoice } from '../src/merchant/invoice'
 import { LocalRegistry } from '../src/registry/localRegistry'
 import { fillOffer, previewFill, type Fill } from '../src/swap/fill'
@@ -106,6 +109,32 @@ test('the maker collects exactly the offer price', async () => {
   const before = await maker.wallet.balance()
   await collectProceeds(maker.wallet, offer, fill.atomicBeef)
   assert.equal(await maker.wallet.balance(), before + PRICE_SATS)
+})
+
+test('a fill declared at the offer price passes the real guardian, previewed against a trusted outpoint', async () => {
+  const second = await createOffer(maker.wallet, split.pieces[1], PRICE_SATS)
+  const secondInvoice = await createInvoice(merchant.wallet, { assetId: second.assetId, amount: 1, metadata: second.metadata })
+  const lock = await paymentLockingScript(invoiceTerms(secondInvoice))
+  // As on mainnet: the agent's registry knows only the offer, checked on the public overlay.
+  const trusting = new LocalRegistry()
+  trusting.trust(second.outpoint, second.beef)
+  assert.equal((await previewFill(second, lock, trusting)).merchantOutputAdmitted, true)
+
+  const payer = await chain.createWallet('agent3', 20_000, 2)
+  const guarded = createGuardedWallet(payer.wallet)
+  const guardian = new Guardian({
+    manager: guarded,
+    wallet: payer.wallet,
+    events: new EventBus(),
+    limits: config.guardian,
+    issueAllowances: false,
+    merchants: [{ domain: 'shop.example.com', label: 'Shop', trust: 'trusted' }],
+    useClaude: false
+  })
+  guardian.start()
+  await guardian.declareIntent({ merchant: 'shop.example.com', item: '1 pUSD', why: 'Pay for an API call', expectedSats: PRICE_SATS + 1, source: 'self' })
+  await fillOffer(bindOriginator(guarded, 'shop.example.com'), second, lock)
+  assert.equal(guardian.journal.at(-1)?.verdict.decision, 'approve')
 })
 
 test('the same offer cannot be filled twice', async () => {

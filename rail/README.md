@@ -13,7 +13,7 @@
 ```sh
 cd rail
 npm install
-npm test               # 离线端到端测试：兑换 7 个、发行 2 个、守门员 3 个
+npm test               # 离线端到端测试：兑换 8 个、发行 2 个、守门员 3 个
 npm run typecheck
 npm run spike          # 第二轮审查的 BTMS 兑换实验
 ```
@@ -29,6 +29,18 @@ CONFIRM_MAINNET=1 npm run desktop:maker # ③ 发行 10 pUSD、拆份、等 1 �
 ```
 
 `desktop:check` 如果报 P-module 相关错误，在后两条命令前加上 `TOKEN_PROTOCOL="agent swap token"`，改用自己的协议名，篮子和标签会一起切换。`desktop:maker` 把代币和签好的报价单存到 `data/maker-smoke.json`（已在 `.gitignore` 里），留给下一步主网成交用。
+
+## 主网真实成交一笔（第 ④ 步）
+
+先完成第 ③ 步，`data/maker-smoke.json` 里要有签好的报价单。agent 和商家各用一个服务端钱包（wallet-toolbox + SQLite，经 Arcade 广播），数据库放在 `data/`。
+
+```sh
+npm run keys:init                        # 生成 agent 和商家的私钥，写进 .env（不进 git），只打印公钥
+CONFIRM_MAINNET=1 npm run agent:fund     # BSV Desktop 用 BRC-29 给 agent 转 20000 sats（FUND_SATS 可改），弹 1 次确认
+CONFIRM_MAINNET=1 npm run agent:fill     # agent 经守门员接单付款 → 商家经公共 overlay 验收入账 → BSV Desktop 收款（弹确认）
+```
+
+`agent:fill` 分 6 步打印进度，成交后把进度存到 `data/fill.json`。如果第 5、6 步失败，直接重跑同一条命令，会从成交之后接着做，不会重复付款。`.env` 里是真钱的私钥，别发给任何人，也别贴到聊天里。
 
 ## 版本
 
@@ -50,7 +62,8 @@ CONFIRM_MAINNET=1 npm run desktop:maker # ③ 发行 10 pUSD、拆份、等 1 �
 | `src/guardian/` | 从 BSV_pet 移植的守门员 | 锁定版本下测试通过；交易核对层待做 |
 | `src/chain/mockChain.ts`、`src/wallet/agentWallet.ts` | 离线链、钱包包装 | 从 BSV_pet 拷贝 |
 | `spikes/` | 审查实验和 overlay 探测脚本 | 可运行 |
-| `scripts/` | 在自己电脑上连 BSV Desktop 的检查和做市方冒烟测试 | 待在本地运行 |
+| `src/chain/serverWallet.ts`、`src/env.ts` | 主网服务端钱包（agent、商家），私钥从 `.env` 读 | 第 ④ 步用 |
+| `scripts/` | 连 BSV Desktop 的检查、做市方冒烟测试、agent 充值和主网成交 | ③ 已跑通，④ 待在本地运行 |
 
 ## 还没做（按设计文档的计划）
 

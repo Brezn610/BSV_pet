@@ -3,12 +3,16 @@
 // ls_btms; testnet has none. Token transactions must be submitted in order, parents first.
 import {
   LookupResolver,
+  PushDrop,
   TopicBroadcaster,
+  Transaction as Tx,
+  Utils,
   type OverlayBroadcastFacilitator,
   type STEAK,
   type TaggedBEEF,
   type Transaction
 } from '@bsv/sdk'
+import type { Admission } from './localRegistry'
 
 export const BTMS_TOPIC = 'tm_btms'
 export const BTMS_LOOKUP = 'ls_btms'
@@ -51,4 +55,47 @@ export async function isOnPublicOverlay(outpoint: string, network: OverlayNetwor
     query: { txid, outputIndex: Number(outputIndex) }
   })
   return answer.type === 'output-list' && answer.outputs.length > 0
+}
+
+/** The hosts that advertise tm_btms in their SHIP records. */
+export async function btmsHosts(network: OverlayNetwork): Promise<string[]> {
+  const answer = await new LookupResolver({ networkPreset: network }).query({ service: 'ls_ship', query: { topics: [BTMS_TOPIC] } })
+  if (answer.type !== 'output-list') return []
+  const hosts = new Set<string>()
+  for (const output of answer.outputs) {
+    try {
+      const { fields } = PushDrop.decode(Tx.fromBEEF(output.beef).outputs[output.outputIndex].lockingScript)
+      hosts.add(Utils.toUTF8(fields[2]))
+    } catch {
+      // Not a SHIP record we can read; skip it.
+    }
+  }
+  return [...hosts]
+}
+
+/**
+ * The public overlay in the shape of LocalRegistry.submit, for the merchant: submits the
+ * transaction and returns what tm_btms admitted. TopicBroadcaster only reports success, but
+ * the merchant must know that its own output was admitted. The first host that answers wins.
+ */
+export class PublicOverlayRegistry {
+  constructor(private readonly network: OverlayNetwork) {}
+
+  async submit(tx: Transaction): Promise<Admission> {
+    const hosts = await btmsHosts(this.network)
+    if (hosts.length === 0) throw new Error(`No ${this.network} host advertises ${BTMS_TOPIC}`)
+    const facilitator = new LegacyTopicsFacilitator()
+    const errors: string[] = []
+    for (const host of hosts) {
+      try {
+        const steak = await facilitator.send(host, { beef: tx.toBEEF(), topics: [BTMS_TOPIC] })
+        const admitted = steak[BTMS_TOPIC]
+        if (admitted === undefined) throw new Error(`no ${BTMS_TOPIC} entry in ${JSON.stringify(steak)}`)
+        return { outputsToAdmit: admitted.outputsToAdmit, coinsToRetain: admitted.coinsToRetain }
+      } catch (err) {
+        errors.push(`${host}: ${(err as Error).message}`)
+      }
+    }
+    throw new Error(`Public overlay did not take the transaction. ${errors.join('; ')}`)
+  }
 }

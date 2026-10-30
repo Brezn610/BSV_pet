@@ -76,7 +76,8 @@
 | 33 | 做市方冒烟测试在主网上跑通：用 BSV Desktop 发行 10 pUSD（`7715fbf4…13db8fe`）、拆成 1+1+1+7（`e95cc1cb…a9487985`），本地登记规则都承认；等 61 秒后通过 `WalletClient` 用 `PushDrop.unlock('single', true)` 预签报价单成功，`checkOffer` 通过。弹窗出现了几次，使用者没有计数 | 实测 | `npm run desktop:maker`，2026-10-30 |
 | 34 | 两笔交易提交公共 `tm_btms` 时都返回 `ERR_ALL_HOSTS_REJECTED`，SDK 吞掉了节点的具体回复 | 实测 | 同上 |
 | 35 | 原因：主网只有一个 BTMS 节点（`backend.01545c29f0fd3c5cb03921d8b1a3ce01.projects.babbage.systems`，SHIP 目录里登记了两次）。sdk 3.2.1 的 `TopicBroadcaster` 发送 `X-Topics: tm_btms`，节点按 JSON 解析失败返回 HTTP 400；改用旧格式 `["tm_btms"]` 返回 200，并承认了发行 `[0]` 和拆份 `[0,1,2,3]`。所以用 AGENTS.md 锁定的 sdk 版本，连官方 BTMS 库都提交不上去。修复：`src/registry/publicOverlay.ts` 的 `LegacyTopicsFacilitator` | 实测 | `npm run diagnose:overlay`，2026-10-30；SDK 注释见 `@bsv/sdk/dist/cjs/src/overlay-tools/SHIPBroadcaster.js` 的 `send` |
-
+| 36 | 用旧格式请求头重新提交已登记过的交易，节点接受请求但不确认任何新输出，SDK 报 `ERR_REQUIRE_ACK_FROM_ANY_HOST_FAILED`；这是重复提交的正常表现，不是错误 | 实测 | `npm run overlay:check`，2026-10-30 |
+| 37 | `ls_btms` 按 `{txid, outputIndex}` 查询时，已被花掉的代币输出也返回 found（发行输出已在拆份中花掉，仍 found）。所以“查得到”只证明来历合法，不证明未花费；未花费要另查，或依赖成交时的双花拒绝 | 实测 | 同上 |
 
 ## 仍未验证
 

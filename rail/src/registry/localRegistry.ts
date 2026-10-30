@@ -42,6 +42,14 @@ export class LocalRegistry {
     return admission
   }
 
+  /**
+   * Records a token output that was checked somewhere else (the public overlay) as admitted,
+   * so preview() can run the BTMS rules on a transaction that spends it.
+   */
+  trust(outpoint: string, beef: number[]): void {
+    this.admitted.set(outpoint, beef)
+  }
+
   /** Admitted and not yet spent: the only state in which a token may be relied on. */
   isLive(outpoint: string): boolean {
     return this.admitted.has(outpoint)

@@ -2,7 +2,7 @@
 // fill transaction once the registry admits the token output. No BTMS messaging is needed;
 // the token is inserted so the stock BTMS library can still see and spend it.
 import { Transaction, type ChainTracker, type WalletInterface, type WalletProtocol } from '@bsv/sdk'
-import type { LocalRegistry } from '../registry/localRegistry'
+import type { Admission } from '../registry/localRegistry'
 import {
   btmsCustomInstructions,
   btmsTags,
@@ -61,6 +61,11 @@ export async function paymentLockingScript(terms: InvoiceTerms, protocol?: Walle
   return (await transferToPublicKey(terms.publicKey, terms.assetId, terms.amount, terms.metadata, protocol)).toHex()
 }
 
+/** Where the merchant registers a payment: LocalRegistry offline, PublicOverlayRegistry on mainnet. */
+export interface TokenRegistry {
+  submit: (tx: Transaction) => Promise<Admission>
+}
+
 export interface AcceptedPayment {
   txid: string
   outputIndex: number
@@ -74,7 +79,7 @@ export async function acceptPayment(
   wallet: WalletInterface,
   invoice: Invoice,
   fillAtomicBeef: number[],
-  registry: LocalRegistry,
+  registry: TokenRegistry,
   options: { chainTracker?: ChainTracker; originator?: string; now?: number } = {}
 ): Promise<AcceptedPayment> {
   if ((options.now ?? Date.now()) > invoice.expiresAt) throw new Error('Invoice has expired')
