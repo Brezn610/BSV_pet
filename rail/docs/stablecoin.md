@@ -1,4 +1,13 @@
-# pUSD: a BSV-collateralized stablecoin for AI agents
+# pUSD: a BSV-collateralized stablecoin for AI agents (experimental)
+
+> **Roadmap / experimental. Not part of the non-custodial core of the submission.**
+> The BSV track requires user funds to be non-custodial, and this design cannot meet that today:
+> 1. **No owner-only exit.** Every path of the collateral script needs the watcher's signature; if the watcher goes offline, loses its key or refuses, the owner's BSV stays locked.
+> 2. **The team can move collateral.** The watcher and the liquidator are both team server keys; together they can spend the collateral without the owner. Only the watcher software prevents it, which in practice is custody.
+> 3. **Liquidation is not permissionless.** The liquidator key is fixed in each vault script, so only the team's bot can liquidate.
+> 4. **Two fixable gaps:** the mainnet liquidation checks the owner's share by amount, not by recipient; and the repaying pUSD is verified by the reserve only after the watcher has signed.
+>
+> The root cause is that BSV script cannot see the debt, the price or where outputs go, and has no covenants or usable timelocks: on Ethereum a contract enforces DAI's rules without trust, on BSV today someone has to. We keep this work because it uses the BSV stack deeply (a BTMS reserve, a custom vault script, an atomic multi-party liquidation) and gives a concrete answer to "why does BSV need covenants?". The submission's core is the owner-exit vault, the API3-bounded watcher, the LLM agent paying over HTTP 402 (see [analyst.md](./analyst.md)) and swap-and-pay.
 
 pUSD is a dollar stablecoin that lives on BSV and is backed by BSV locked as collateral, in the style of DAI. An owner locks BSV, takes pUSD against it, and gives it to their AI agent as a stable budget. The price that decides how much pUSD a position may take, and when it is liquidated, is a signed API3 price. There is no bridge: the stablecoin, the collateral, the payments and the liquidations are all on BSV.
 

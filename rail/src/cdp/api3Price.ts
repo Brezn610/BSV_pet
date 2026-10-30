@@ -72,15 +72,19 @@ export function toApi3Price(response: Api3SignedResponse, maxDataLagSec = 300): 
   }
 }
 
-interface Api3Modules {
+export interface Api3Modules {
   BSV_USD: { url: string; airnode: string; request: unknown }
   feedRequestHash: (feed: unknown) => string
+  tweetFeed: (userName: string) => { url: string; airnode: string; request: unknown }
+  parseTweetData: (data: string) => { id: string; text: string }
+  isRetweet: (tweet: { id: string; text: string }) => boolean
+  tweetPostedAt: (id: string) => number
   fetchSignedResponse: (url: string, request: unknown, fetchFunction?: typeof fetch) => Promise<Api3SignedResponse>
   verifySignedResponse: (response: Api3SignedResponse, airnode: string, requestHash: string) => Promise<void>
   createPayingFetch?: (payerPrivateKey: string) => typeof fetch
 }
 
-async function loadApi3(dir: string): Promise<Api3Modules> {
+export async function loadApi3(dir: string): Promise<Api3Modules> {
   if (!existsSync(path.join(dir, 'src', 'airnode-v2.ts'))) throw new Error(`API3 code not found in ${dir}; set API3_DIR`)
   const load = async (file: string) => await import(pathToFileURL(path.join(dir, 'src', file)).href)
   const [airnode, feeds, x402] = await Promise.all([load('airnode-v2.ts'), load('client/feeds.ts'), load('x402.ts')])

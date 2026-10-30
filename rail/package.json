@@ -21,7 +21,9 @@
     "desktop:offer": "tsx scripts/maker-offer.ts",
     "demo:cdp": "tsx scripts/cdp-demo.ts",
     "price:api3": "tsx scripts/api3-price.ts",
-    "cdp": "tsx scripts/cdp-mainnet.ts"
+    "cdp": "tsx scripts/cdp-mainnet.ts",
+    "analyst": "tsx scripts/analyst-mainnet.ts",
+    "analyst:pay": "tsx scripts/analyst-pay.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",
