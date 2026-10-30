@@ -13,11 +13,22 @@
 ```sh
 cd rail
 npm install
-npm test               # 离线端到端测试：兑换 7 个 + 守门员 3 个
+npm test               # 离线端到端测试：兑换 7 个、发行 2 个、守门员 3 个
 npm run typecheck
 npm run spike          # 第二轮审查的 BTMS 兑换实验
-npm run probe:overlay  # 查主网/测试网公共 overlay 有没有托管 tm_btms（需要正常网络）
 ```
+
+## 在自己电脑上做主网验证（H0–H4 第 ② ③ 步）
+
+需要 BSV Desktop 在同一台电脑上打开并解锁，钱包里有主网 sats。
+
+```sh
+npm run probe:overlay                   # ② 公共 overlay 有没有托管 tm_btms（不花钱）
+npm run desktop:check                   # ③ 连 BSV Desktop，检查 p btms 协议和篮子（不花钱）
+CONFIRM_MAINNET=1 npm run desktop:maker # ③ 发行 10 pUSD、拆份、等 1 分钟、预签 1 张报价单（花几百 sats）
+```
+
+`desktop:check` 如果报 P-module 相关错误，在后两条命令前加上 `TOKEN_PROTOCOL="agent swap token"`，改用自己的协议名，篮子和标签会一起切换。`desktop:maker` 把代币和签好的报价单存到 `data/maker-smoke.json`（已在 `.gitignore` 里），留给下一步主网成交用。
 
 ## 版本
 
@@ -29,7 +40,8 @@ npm run probe:overlay  # 查主网/测试网公共 overlay 有没有托管 tm_bt
 
 | 路径 | 内容 | 状态 |
 | --- | --- | --- |
-| `src/token/pusd.ts` | pUSD 协议名、单位、给别人公钥锁代币、解码 | 完成 |
+| `src/token/pusd.ts` | pUSD 协议名、篮子和标签开关、单位、给别人公钥锁代币、解码 | 完成 |
+| `src/token/issue.ts` | 发行 pUSD（BTMS 格式，跟随协议开关） | 完成，离线测试 |
 | `src/token/split.ts` | 把代币拆成刚好的份额（做市方） | 完成，离线测试 |
 | `src/swap/offer.ts` | 做市方只签一半的报价单；接单前校验签名；做市方收款 | 完成，离线测试 |
 | `src/swap/fill.ts` | agent 一笔交易成交；签名前预跑登记规则 | 完成，离线测试 |
@@ -38,6 +50,7 @@ npm run probe:overlay  # 查主网/测试网公共 overlay 有没有托管 tm_bt
 | `src/guardian/` | 从 BSV_pet 移植的守门员 | 锁定版本下测试通过；交易核对层待做 |
 | `src/chain/mockChain.ts`、`src/wallet/agentWallet.ts` | 离线链、钱包包装 | 从 BSV_pet 拷贝 |
 | `spikes/` | 审查实验和 overlay 探测脚本 | 可运行 |
+| `scripts/` | 在自己电脑上连 BSV Desktop 的检查和做市方冒烟测试 | 待在本地运行 |
 
 ## 还没做（按设计文档的计划）
 

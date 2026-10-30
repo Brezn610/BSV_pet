@@ -4,12 +4,13 @@
 import { Transaction, type ChainTracker, type WalletInterface, type WalletProtocol } from '@bsv/sdk'
 import type { LocalRegistry } from '../registry/localRegistry'
 import {
-  BTMS_BASKET,
   btmsCustomInstructions,
   btmsTags,
   decodeToken,
   keyIdOf,
   randomDerivation,
+  tokenBasket,
+  tokenLabel,
   tokenProtocol,
   transferToPublicKey
 } from '../token/pusd'
@@ -103,13 +104,13 @@ export async function acceptPayment(
     {
       tx: fillAtomicBeef,
       description: `Receive pUSD for order ${invoice.orderId.slice(0, 8)}`,
-      labels: [`p btms assetId ${invoice.assetId}`],
+      labels: [tokenLabel(`assetId ${invoice.assetId}`)],
       outputs: [
         {
           outputIndex,
           protocol: 'basket insertion',
           insertionRemittance: {
-            basket: BTMS_BASKET,
+            basket: tokenBasket(),
             customInstructions: btmsCustomInstructions(invoice.derivation.prefix, invoice.derivation.suffix),
             tags: btmsTags('receive', invoice.assetId)
           }

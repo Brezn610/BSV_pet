@@ -3,12 +3,13 @@
 import { Transaction, type WalletInterface, type WalletProtocol } from '@bsv/sdk'
 import { BTMSToken } from '@bsv/btms'
 import {
-  BTMS_BASKET,
   btmsCustomInstructions,
   btmsTags,
   bytes,
   keyIdOf,
   randomDerivation,
+  tokenBasket,
+  tokenLabel,
   tokenProtocol
 } from './pusd'
 
@@ -48,7 +49,7 @@ export async function splitToken(
     plan.map(async (amount, i) => ({
       satoshis: 1,
       lockingScript: (await template.createTransfer(source.assetId, amount, keys[i], 'self', source.metadata)).toHex(),
-      basket: BTMS_BASKET,
+      basket: tokenBasket(),
       customInstructions: btmsCustomInstructions(prefix, keys[i].split(' ')[1]),
       tags: btmsTags('change', source.assetId),
       outputDescription: i < pieceAmounts.length ? 'pUSD offer piece' : 'pUSD change'
@@ -61,7 +62,7 @@ export async function splitToken(
       inputBEEF: source.beef,
       inputs: [{ outpoint: source.outpoint, unlockingScriptLength: 74, inputDescription: 'pUSD to split' }],
       outputs,
-      labels: ['p btms type split'],
+      labels: [tokenLabel('type split')],
       options: { randomizeOutputs: false }
     },
     options.originator

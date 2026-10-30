@@ -10,7 +10,9 @@
     "test": "tsx --test --test-timeout=300000 test/*.test.ts",
     "spike": "tsx --test --test-timeout=300000 spikes/btms-swap.test.ts",
     "probe:overlay": "tsx spikes/probe-overlay.ts",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "desktop:check": "tsx scripts/desktop-check.ts",
+    "desktop:maker": "tsx scripts/maker-smoke.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

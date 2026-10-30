@@ -11,9 +11,26 @@ import { randomBytesHex } from '@bsv/wallet-toolbox'
 export const BTMS_PROTOCOL: WalletProtocol = [0, 'p btms']
 export const BTMS_BASKET = 'p btms'
 
-export function tokenProtocol(): WalletProtocol {
+function customProtocol(): string | undefined {
   const custom = process.env.TOKEN_PROTOCOL
-  return custom === undefined || custom === '' ? BTMS_PROTOCOL : [1, custom]
+  return custom === undefined || custom === '' ? undefined : custom
+}
+
+export function tokenProtocol(): WalletProtocol {
+  const custom = customProtocol()
+  return custom === undefined ? BTMS_PROTOCOL : [1, custom]
+}
+
+/**
+ * Where token outputs are kept. Basket and label names starting with "p " need the same
+ * BTMS permission module, so they switch together with the protocol.
+ */
+export function tokenBasket(): string {
+  return customProtocol() ?? BTMS_BASKET
+}
+
+export function tokenLabel(text: string): string {
+  return `${customProtocol() === undefined ? 'p btms' : 'agent swap'} ${text}`
 }
 
 /** One pUSD unit is one US cent. BTMS amounts are integers, so prices are whole cents. */
