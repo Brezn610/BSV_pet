@@ -3,12 +3,14 @@
 // Guardian agent instead of a human.
 import type { WalletInterface } from '@bsv/sdk'
 import { WalletPermissionsManager, type Wallet } from '@bsv/wallet-toolbox'
+import type { TxObserver } from '../guardian/txObserver'
 
 /** The admin originator is the pet's own runtime (soul token upkeep). It is never handed to the pet's brain. */
 export const ADMIN_ORIGINATOR = 'admin.satspet.local'
 
-export function createGuardedWallet(underlying: Wallet): WalletPermissionsManager {
-  return new WalletPermissionsManager(underlying, ADMIN_ORIGINATOR, {
+/** With `observer`, the guardian can also see each transaction it is asked to authorize. */
+export function createGuardedWallet(underlying: Wallet, observer?: TxObserver): WalletPermissionsManager {
+  return new WalletPermissionsManager(observer === undefined ? underlying : observer.wrap(underlying), ADMIN_ORIGINATOR, {
     // The demo is about money. Every other permission class is switched off so
     // the only prompt that can fire is a spending authorization.
     seekSpendingPermissions: true,

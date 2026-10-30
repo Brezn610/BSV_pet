@@ -3,7 +3,8 @@
 // The agent takes the offer saved by desktop:maker, through its guarded wallet, and pays the
 // merchant's invoice in pUSD. The merchant has the public overlay admit the payment and takes
 // it in. The maker (BSV Desktop) then collects its sats.
-// Progress is saved to data/fill.json, so a rerun resumes after the fill instead of filling again.
+// Progress is saved to data/fill-<offer>.json, so a rerun resumes after the fill instead of filling again.
+// For another fill, pre-sign a new offer first with desktop:offer.
 // Run from rail/ after agent:fund:  CONFIRM_MAINNET=1 npm run agent:fill
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -12,7 +13,9 @@ import { openServerWallet } from '../src/chain/serverWallet'
 import { config } from '../src/config'
 import { DATA_DIR, loadEnv, requireEnv } from '../src/env'
 import { EventBus } from '../src/events'
-import { Guardian } from '../src/guardian/guardian'
+import { Guardian, type JournalEntry } from '../src/guardian/guardian'
+import { swapPayPlan } from '../src/guardian/txCheck'
+import { TxObserver } from '../src/guardian/txObserver'
 import { acceptPayment, createInvoice, invoiceTerms, paymentLockingScript, type Invoice } from '../src/merchant/invoice'
 import { LocalRegistry } from '../src/registry/localRegistry'
 import { isOnPublicOverlay, PublicOverlayRegistry } from '../src/registry/publicOverlay'
@@ -23,7 +26,6 @@ import { bindOriginator, createGuardedWallet } from '../src/wallet/agentWallet'
 
 const MERCHANT = process.env.MERCHANT_DOMAIN ?? 'shop.agentswap.dev'
 const MAKER_FILE = path.join(DATA_DIR, 'maker-smoke.json')
-const FILL_FILE = path.join(DATA_DIR, 'fill.json')
 
 interface Progress {
   offerOutpoint: string
@@ -37,8 +39,11 @@ interface Progress {
 
 const woc = (txid: string): string => `https://whatsonchain.com/tx/${txid}`
 
+/** One progress file per offer, so a new offer from desktop:offer starts fresh. */
+const progressFile = (outpoint: string): string => path.join(DATA_DIR, `fill-${outpoint}.json`)
+
 function save(progress: Progress): void {
-  writeFileSync(FILL_FILE, JSON.stringify(progress, null, 2))
+  writeFileSync(progressFile(progress.offerOutpoint), JSON.stringify(progress, null, 2))
 }
 
 async function main(): Promise<void> {
@@ -57,10 +62,11 @@ async function main(): Promise<void> {
   const agent = await openServerWallet('agent', requireEnv('AGENT_ROOT_KEY_HEX'), DATA_DIR)
   const merchant = await openServerWallet('merchant', requireEnv('MERCHANT_ROOT_KEY_HEX'), DATA_DIR)
   try {
-    let progress: Progress | undefined = existsSync(FILL_FILE) ? (JSON.parse(readFileSync(FILL_FILE, 'utf8')) as Progress) : undefined
-    if (progress !== undefined && progress.offerOutpoint !== offer.outpoint) {
-      throw new Error(`${FILL_FILE} belongs to another offer (${progress.offerOutpoint}). Move it away to fill this one.`)
-    }
+    // The first mainnet fill kept its progress in fill.json.
+    const file = [progressFile(offer.outpoint), path.join(DATA_DIR, 'fill.json')].find(
+      f => existsSync(f) && (JSON.parse(readFileSync(f, 'utf8')) as Progress).offerOutpoint === offer.outpoint
+    )
+    let progress: Progress | undefined = file === undefined ? undefined : (JSON.parse(readFileSync(file, 'utf8')) as Progress)
 
     if (progress === undefined) {
       console.log(`Agent ${agent.identityKey}: ${await agent.wallet.balance()} sats.`)
@@ -82,10 +88,17 @@ async function main(): Promise<void> {
       if (!preview.merchantOutputAdmitted) throw new Error(`The merchant's pUSD would not be admitted: ${JSON.stringify(preview.admission)}`)
       console.log('    the merchant output would be admitted')
 
-      console.log('4/6 Agent fills the offer through its guarded wallet...')
-      const guarded = createGuardedWallet(agent.wallet)
+      console.log('4/6 Agent fills the offer through its guarded wallet; the guardian checks the transaction...')
+      const observer = new TxObserver()
+      const guarded = createGuardedWallet(agent.wallet, observer)
       const events = new EventBus()
-      events.subscribe(event => console.log(`    [guardian] ${event.message}`))
+      events.subscribe(event => {
+        console.log(`    [guardian] ${event.message}`)
+        if (event.type !== 'guardian.decision') return
+        for (const f of (event.data as JournalEntry).verdict.findings) {
+          if (f.rule.startsWith('tx-')) console.log(`    [guardian]   ${f.severity === 'ok' ? 'ok' : f.severity.toUpperCase()}: ${f.detail}`)
+        }
+      })
       const guardian = new Guardian({
         manager: guarded,
         wallet: agent.wallet,
@@ -93,7 +106,8 @@ async function main(): Promise<void> {
         limits: config.guardian,
         issueAllowances: false,
         merchants: [{ domain: MERCHANT, label: 'Demo merchant', trust: 'trusted' }],
-        useClaude: false
+        useClaude: false,
+        observer
       })
       guardian.start()
       await guardian.declareIntent({
@@ -103,7 +117,7 @@ async function main(): Promise<void> {
         // Output line items: the maker's price plus the merchant's 1-sat token output.
         expectedSats: offer.priceSats + 1,
         source: 'self'
-      })
+      }, await swapPayPlan(offer, invoiceTerms(invoice)))
       const fill = await fillOffer(bindOriginator(guarded, MERCHANT), offer, merchantLock).finally(() => guardian.clearIntent(MERCHANT))
       progress = { offerOutpoint: offer.outpoint, invoice, txid: fill.txid, atomicBeef: fill.atomicBeef, filledAt: Date.now() }
       save(progress)

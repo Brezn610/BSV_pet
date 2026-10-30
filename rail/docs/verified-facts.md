@@ -82,6 +82,7 @@
 | 39 | 第一笔主网“换币即付款”成交：txid `ee2a38964df993af6cd48f5f51d1ce0c07c7bf454363735341288d7f71bf8e8c`。一笔交易里 agent 接下做市方预签的报价单，付做市方 1000 sats，1 pUSD 直接给商家（输出 1）。守门员收到 1066 sats 的请求（输出 1001 + 手续费 65），与报备意图一致后放行；agent 余额 20000 → 18934 | 实测 | `npm run agent:fill`，2026-10-30 |
 | 40 | 商家用旧格式请求头把成交提交给公共 `tm_btms`，节点回的 STEAK 承认了商家的 pUSD 输出，商家随后入账；BSV Desktop 作为做市方收下 1000 sats。R1 在主网端到端跑通 | 实测 | 同上 |
 | 41 | 预览时 `BTMSTopicManager` 打印 `Skipping output 0: script.chunks[0].data must have value`：输出 0 是付给做市方的 P2PKH，不是代币，登记规则跳过它，属正常 | 实测 | 同上 |
+| 42 | 主网成交整个过程 BSV Desktop 只弹 1 次确认（第 6 步做市方收款）；agent 和商家用服务端钱包，不弹窗 | 实测（使用者确认） | 同上 |
 
 ## 仍未验证
 

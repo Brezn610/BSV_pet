@@ -6,6 +6,8 @@ import { Hash, Utils } from '@bsv/sdk'
 import type { PermissionToken, Wallet, WalletPermissionsManager } from '@bsv/wallet-toolbox'
 import type { EventBus } from '../events'
 import { judgeWithClaude } from './llmJudge'
+import { checkTransaction, type TxPlan } from './txCheck'
+import type { TxObserver } from './txObserver'
 import {
   evaluatePolicy,
   paymentAmount,
@@ -51,12 +53,19 @@ export interface GuardianOptions {
   issueAllowances: boolean
   merchants: MerchantProfile[]
   useClaude: boolean
+  /**
+   * When set, every payment is also checked transaction by transaction: the guardian takes the
+   * transaction the wallet built from the observer and compares it with the declared plan.
+   * Pass the same observer to createGuardedWallet.
+   */
+  observer?: TxObserver
 }
 
 const GENESIS = '00'.repeat(32)
 
 export class Guardian {
   private readonly intents = new Map<string, SpendIntent>()
+  private readonly plans = new Map<string, TxPlan>()
   /**
    * Balance captured when an intent is declared. While a payment is being built
    * the wallet has already locked its inputs, so asking for the balance from
@@ -90,14 +99,21 @@ export class Guardian {
     return [...this.merchants.values()]
   }
 
-  /** The pet must say what it is buying before it pays. Undeclared spends are denied. */
-  async declareIntent(intent: Omit<SpendIntent, 'declaredAt'>): Promise<void> {
+  /**
+   * The agent must say what it is buying before it pays. Undeclared spends are denied. With an
+   * observer, `plan` says what the transaction must look like; build it with swapPayPlan.
+   */
+  async declareIntent(intent: Omit<SpendIntent, 'declaredAt'>, plan?: TxPlan): Promise<void> {
     this.balanceSnapshot = await this.opts.wallet.balance()
+    this.opts.observer?.discard(intent.merchant)
     this.intents.set(intent.merchant, { ...intent, declaredAt: Date.now() })
+    if (plan === undefined) this.plans.delete(intent.merchant)
+    else this.plans.set(intent.merchant, plan)
   }
 
   clearIntent(merchant: string): void {
     this.intents.delete(merchant)
+    this.plans.delete(merchant)
   }
 
   spentLast24h(): number {
@@ -178,7 +194,8 @@ export class Guardian {
       spentLast24h: this.spentLast24h(),
       merchant,
       intent,
-      limits: this.opts.limits
+      limits: this.opts.limits,
+      txFindings: await this.checkTx(request.originator)
     }
     const { outcome, findings } = evaluatePolicy(request, ctx)
     const details = (severity: Finding['severity']): string[] =>
@@ -235,6 +252,19 @@ export class Guardian {
       judge: 'claude',
       findings
     }
+  }
+
+  private async checkTx(originator: string): Promise<Finding[] | undefined> {
+    if (this.opts.observer === undefined) return undefined
+    const { tx, inFlight } = this.opts.observer.take(originator)
+    if (tx === undefined) {
+      return [{ rule: 'tx-check', severity: 'block', detail: `Expected one transaction awaiting authorization, found ${inFlight}.` }]
+    }
+    const plan = this.plans.get(originator)
+    if (plan === undefined) {
+      return [{ rule: 'tx-check', severity: 'block', detail: 'No transaction plan was declared, so the transaction cannot be checked.' }]
+    }
+    return await checkTransaction(tx, plan)
   }
 
   /** What the wallet has already paid this merchant this month, as the permissions manager counts it. */

@@ -2,11 +2,14 @@
 // issue pUSD -> split -> maker offer -> merchant invoice -> agent fill -> registry -> both sides settle.
 import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
+import { PrivateKey } from '@bsv/sdk'
 import { BTMS } from '@bsv/btms'
 import { MockChain, type MockWallet } from '../src/chain/mockChain'
 import { config } from '../src/config'
 import { EventBus } from '../src/events'
 import { Guardian } from '../src/guardian/guardian'
+import { swapPayPlan } from '../src/guardian/txCheck'
+import { TxObserver } from '../src/guardian/txObserver'
 import { acceptPayment, createInvoice, invoiceTerms, paymentLockingScript, type Invoice } from '../src/merchant/invoice'
 import { LocalRegistry } from '../src/registry/localRegistry'
 import { fillOffer, previewFill, type Fill } from '../src/swap/fill'
@@ -111,30 +114,71 @@ test('the maker collects exactly the offer price', async () => {
   assert.equal(await maker.wallet.balance(), before + PRICE_SATS)
 })
 
-test('a fill declared at the offer price passes the real guardian, previewed against a trusted outpoint', async () => {
-  const second = await createOffer(maker.wallet, split.pieces[1], PRICE_SATS)
-  const secondInvoice = await createInvoice(merchant.wallet, { assetId: second.assetId, amount: 1, metadata: second.metadata })
-  const lock = await paymentLockingScript(invoiceTerms(secondInvoice))
-  // As on mainnet: the agent's registry knows only the offer, checked on the public overlay.
-  const trusting = new LocalRegistry()
-  trusting.trust(second.outpoint, second.beef)
-  assert.equal((await previewFill(second, lock, trusting)).merchantOutputAdmitted, true)
-
-  const payer = await chain.createWallet('agent3', 20_000, 2)
-  const guarded = createGuardedWallet(payer.wallet)
+/** An agent wallet behind the real guardian with the transaction check switched on. */
+async function firewalledAgent(name: string) {
+  const payer = await chain.createWallet(name, 20_000, 2)
+  const observer = new TxObserver()
+  const guarded = createGuardedWallet(payer.wallet, observer)
   const guardian = new Guardian({
     manager: guarded,
     wallet: payer.wallet,
     events: new EventBus(),
     limits: config.guardian,
     issueAllowances: false,
-    merchants: [{ domain: 'shop.example.com', label: 'Shop', trust: 'trusted' }],
-    useClaude: false
+    merchants: [{ domain: SHOP, label: 'Shop', trust: 'trusted' }],
+    useClaude: false,
+    observer
   })
   guardian.start()
-  await guardian.declareIntent({ merchant: 'shop.example.com', item: '1 pUSD', why: 'Pay for an API call', expectedSats: PRICE_SATS + 1, source: 'self' })
-  await fillOffer(bindOriginator(guarded, 'shop.example.com'), second, lock)
-  assert.equal(guardian.journal.at(-1)?.verdict.decision, 'approve')
+  return { guardian, wallet: bindOriginator(guarded, SHOP) }
+}
+
+const SHOP = 'shop.example.com'
+const intentFor = (o: SignedOffer) => ({ merchant: SHOP, item: `${o.amount} pUSD`, why: 'Pay for an API call', expectedSats: o.priceSats + 1, source: 'self' as const })
+
+test('a fill previews the same against a registry that only trusts the offer outpoint', async () => {
+  const second = await createOffer(maker.wallet, split.pieces[1], PRICE_SATS)
+  const terms = invoiceTerms(await createInvoice(merchant.wallet, { assetId: second.assetId, amount: 1, metadata: second.metadata }))
+  // As on mainnet: the agent's registry knows only the offer, checked on the public overlay.
+  const trusting = new LocalRegistry()
+  trusting.trust(second.outpoint, second.beef)
+  assert.equal((await previewFill(second, await paymentLockingScript(terms), trusting)).merchantOutputAdmitted, true)
+})
+
+test('the transaction check blocks a fill that pays someone other than the invoice, and the offer survives', async () => {
+  const second = await createOffer(maker.wallet, split.pieces[1], PRICE_SATS)
+  const terms = invoiceTerms(await createInvoice(merchant.wallet, { assetId: second.assetId, amount: 1, metadata: second.metadata }))
+  const { guardian, wallet } = await firewalledAgent('agent3')
+
+  // Same price and amount, so the totals look right; only the recipient key was swapped.
+  const thief = await transferToPublicKey(PrivateKey.fromRandom().toPublicKey().toString(), second.assetId, 1, second.metadata)
+  await guardian.declareIntent(intentFor(second), await swapPayPlan(second, terms))
+  await assert.rejects(fillOffer(wallet, second, thief.toHex()))
+  const denied = guardian.journal.at(-1)!
+  assert.equal(denied.verdict.decision, 'deny')
+  assert.ok(denied.verdict.findings.some(f => f.rule === 'tx-outputs' && f.severity === 'block'))
+
+  // The denied fill was aborted, so the maker's token and the agent's coins are still free.
+  await guardian.declareIntent(intentFor(second), await swapPayPlan(second, terms))
+  await fillOffer(wallet, second, await paymentLockingScript(terms))
+  const approved = guardian.journal.at(-1)!
+  assert.equal(approved.verdict.decision, 'approve')
+  assert.ok(approved.verdict.findings.some(f => f.rule === 'tx-check' && f.severity === 'ok'))
+})
+
+test('the transaction check blocks a payment without a plan', async () => {
+  const third = await createOffer(maker.wallet, split.pieces[2], PRICE_SATS)
+  const terms = invoiceTerms(await createInvoice(merchant.wallet, { assetId: third.assetId, amount: 1, metadata: third.metadata }))
+  const { guardian, wallet } = await firewalledAgent('agent4')
+  await guardian.declareIntent(intentFor(third))
+  await assert.rejects(fillOffer(wallet, third, await paymentLockingScript(terms)))
+  assert.ok(guardian.journal.at(-1)!.verdict.findings.some(f => f.rule === 'tx-check' && f.severity === 'block'))
+})
+
+test('a plan cannot be built for an invoice the offer does not cover', async () => {
+  const third = await createOffer(maker.wallet, split.pieces[2], PRICE_SATS)
+  const terms = invoiceTerms(await createInvoice(merchant.wallet, { assetId: third.assetId, amount: 2, metadata: third.metadata }))
+  await assert.rejects(swapPayPlan(third, terms), /invoice asks for 2/)
 })
 
 test('the same offer cannot be filled twice', async () => {

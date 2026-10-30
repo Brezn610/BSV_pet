@@ -46,6 +46,8 @@ export interface PolicyContext {
   merchant?: MerchantProfile
   intent?: SpendIntent
   limits: PolicyLimits
+  /** What the transaction check found, when the guardian could see the transaction. */
+  txFindings?: Finding[]
 }
 
 export interface Finding {
@@ -128,6 +130,8 @@ export function evaluatePolicy(request: SpendRequest, ctx: PolicyContext): { out
       detail: `Would leave ${ctx.balance - request.satoshis} sats, below the ${limits.reserveSats} sat reserve.`
     })
   }
+
+  findings.push(...(ctx.txFindings ?? []))
 
   const outcome: PolicyOutcome = findings.some(f => f.severity === 'block')
     ? 'deny'

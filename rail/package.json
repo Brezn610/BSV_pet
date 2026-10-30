@@ -17,7 +17,8 @@
     "overlay:check": "tsx scripts/overlay-check.ts",
     "keys:init": "tsx scripts/keys-init.ts",
     "agent:fund": "tsx scripts/agent-fund.ts",
-    "agent:fill": "tsx scripts/agent-fill.ts"
+    "agent:fill": "tsx scripts/agent-fill.ts",
+    "desktop:offer": "tsx scripts/maker-offer.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

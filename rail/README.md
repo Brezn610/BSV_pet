@@ -13,7 +13,7 @@
 ```sh
 cd rail
 npm install
-npm test               # 离线端到端测试：兑换 8 个、发行 2 个、守门员 3 个
+npm test               # 离线端到端测试：兑换 11 个、发行 2 个、守门员 3 个
 npm run typecheck
 npm run spike          # 第二轮审查的 BTMS 兑换实验
 ```
@@ -40,7 +40,25 @@ CONFIRM_MAINNET=1 npm run agent:fund     # BSV Desktop 用 BRC-29 给 agent 转 
 CONFIRM_MAINNET=1 npm run agent:fill     # agent 经守门员接单付款 → 商家经公共 overlay 验收入账 → BSV Desktop 收款（弹确认）
 ```
 
-`agent:fill` 分 6 步打印进度，成交后把进度存到 `data/fill.json`。如果第 5、6 步失败，直接重跑同一条命令，会从成交之后接着做，不会重复付款。`.env` 里是真钱的私钥，别发给任何人，也别贴到聊天里。
+`agent:fill` 分 6 步打印进度，第 4 步会打印守门员交易核对的结果。成交后把进度存到 `data/fill-<报价单>.json`。如果第 5、6 步失败，直接重跑同一条命令，会从成交之后接着做，不会重复付款。`.env` 里是真钱的私钥，别发给任何人，也别贴到聊天里。
+
+再成交一笔：先用剩下的 pUSD 小份预签一张新报价单，再成交。
+
+```sh
+npm run desktop:offer                    # 不花钱，BSV Desktop 可能弹 1 次签名确认
+CONFIRM_MAINNET=1 npm run agent:fill
+```
+
+## 守门员的交易核对层
+
+守门员原来只看到“要付多少 sats”和每项描述。现在 `TxObserver` 夹在权限管理器和真钱包之间，守门员在批准前拿到钱包真正要签的那笔交易，和 agent 事先报备的计划（`swapPayPlan`，由代码从报价单和发票算出来，不由模型写）逐项比对：
+
+- 输入 0 是报价单的代币，做市方的签名原样带上；其余输入只能是普通的钱，不能把 agent 自己的代币当零钱花掉。
+- 输出 0 付做市方，金额等于报价；输出 1 是给商家的 pUSD，锁定脚本和发票算出的一模一样；多出来的找零不能是代币。
+- 手续费不超过上限（默认 500 sats）。
+- 用 BTMS 登记规则预跑这笔真实交易，确认给商家的 pUSD 会被承认，不会被烧掉。
+
+任何一项对不上就拒绝，钱包放弃这笔交易，报价单和 agent 的钱都不动。离线测试里演示了“收款人被调包”被拦下、之后同一张报价单还能正常成交。
 
 ## 版本
 
@@ -59,7 +77,7 @@ CONFIRM_MAINNET=1 npm run agent:fill     # agent 经守门员接单付款 → �
 | `src/swap/fill.ts` | agent 一笔交易成交；签名前预跑登记规则 | 完成，离线测试 |
 | `src/merchant/invoice.ts` | 商家按单派生收款公钥；验证、登记、入账 | 完成，离线测试 |
 | `src/registry/` | 官方 BTMS 登记规则 + 进程内迷你登记处 | 完成 |
-| `src/guardian/` | 从 BSV_pet 移植的守门员 | 锁定版本下测试通过；交易核对层待做 |
+| `src/guardian/` | 守门员：规则、Claude 裁判、交易核对层（`txCheck.ts`、`txObserver.ts`） | 完成，离线测试；主网成交已接入 |
 | `src/chain/mockChain.ts`、`src/wallet/agentWallet.ts` | 离线链、钱包包装 | 从 BSV_pet 拷贝 |
 | `spikes/` | 审查实验和 overlay 探测脚本 | 可运行 |
 | `src/chain/serverWallet.ts`、`src/env.ts` | 主网服务端钱包（agent、商家），私钥从 `.env` 读 | 第 ④ 步用 |
@@ -67,11 +85,11 @@ CONFIRM_MAINNET=1 npm run agent:fill     # agent 经守门员接单付款 → �
 
 ## 还没做（按设计文档的计划）
 
-1. 主网验证：BSV Desktop 是否有 BTMS 权限模块（`p btms`），主网公共 overlay 是否托管 `tm_btms`。没有模块就设 `TOKEN_PROTOCOL` 换成自己的协议名。
-2. 守门员的交易核对层：解析实际交易，和 agent 报备的结构化意图逐项比对，接上 `previewFill` 和 `checkOffer`。
-3. 报价簿服务、商家的 402 HTTP 接口、恶意 API。
-4. 做市方命令行脚本：用 `WalletClient('auto', '<域名>')` 连 BSV Desktop 拆份、签单、收款。
-5. agent（Claude）、面板、主网服务端钱包配置。
+主网验证（H0–H4）已全部完成，见 `docs/verified-facts.md` 第 31–42 条。
+
+1. 报价簿服务、商家的 402 HTTP 接口、恶意 API（演示守门员拦截）。
+2. 做市方命令行：把 `desktop:maker`、`desktop:offer` 和收款整理成一个工具。
+3. agent（Claude）和面板。
 
 ## 安全
 
