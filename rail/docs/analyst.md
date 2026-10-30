@@ -61,6 +61,8 @@ cloudflared tunnel --url http://localhost:4402
 CONFIRM_MAINNET=1 npm run analyst:pay      # one paid call from a server wallet; ANALYST_URL picks the endpoint
 ```
 
+The live demo, with fallbacks, is in [demo-analyst.md](./demo-analyst.md).
+
 Settings: `ANALYST_PORT` (default 4402), `ANALYST_PRICE_SATS` (default 100, at most 500), `ANTHROPIC_API_KEY` and `RAIL_MODEL` for Claude. Every paid call is appended to `data/analyst-payments.jsonl` (gitignored).
 
 ## Code
